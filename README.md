@@ -79,6 +79,28 @@ psql -U postgres -d devsecops_dashboard -f db/schema.sql
 Grafana's datasource is provisioned against this database on container start, so it needs to
 exist (even if empty) before step 3.
 
+**Also required — let Grafana (in Docker) reach this native Postgres:** a fresh PostgreSQL
+install usually only listens on `localhost` and only allows connections from `127.0.0.1` in
+`pg_hba.conf`. Grafana connects from inside a Docker container via `host.docker.internal`,
+which does **not** count as localhost from Postgres's point of view — without this change the
+Grafana datasource will fail to connect (untested on this repo so far; see "Project status"
+below).
+
+1. Locate `postgresql.conf` and `pg_hba.conf` (typically
+   `C:\Program Files\PostgreSQL\18\data\` on Windows).
+2. In `postgresql.conf`, set `listen_addresses = '*'` (default is usually `'localhost'`).
+3. In `pg_hba.conf`, add a line allowing Docker Desktop's internal network to authenticate:
+   ```
+   host    devsecops_dashboard    postgres    172.16.0.0/12    scram-sha-256
+   ```
+   `172.16.0.0/12` covers Docker's default bridge/WSL2 ranges. If Grafana still can't connect,
+   check the Postgres log for the actual source IP being rejected and narrow/widen the range
+   accordingly — this is local-only dev, so a broader range (or even `0.0.0.0/0`, given the
+   Postgres port isn't published outside this machine) is an acceptable fallback if needed.
+4. Restart the PostgreSQL service (`Restart-Service postgresql-x64-18` in an elevated
+   PowerShell, or via Services.msc) and confirm Windows Firewall isn't blocking inbound
+   connections on port 5432 from the Docker virtual network.
+
 ### 3. Configure credentials
 
 Copy `.env.example` to `.env` and fill in your real Postgres password — `docker compose`
@@ -196,6 +218,37 @@ Known limitations below).
   by hand rather than exported from a running Grafana instance (this project is built/pushed
   from a machine that can't run the full stack — see above). Layout/queries are correct, but
   minor panel-schema quirks may need a small tweak the first time it's actually loaded.
+
+## Project status — what to verify first on a new machine
+
+Everything in this repo was written and pushed **from a memory-constrained laptop that could
+never actually run the stack** — running ZAP's spider/active scan there was slow enough to
+stall the whole machine. So the code, `docker-compose.yml`, and Grafana provisioning are
+believed correct (config was syntax-validated: `docker compose config`, and the dashboard JSON
+was checked for valid JSON) but **none of it has been run end-to-end**. If you're picking this
+up on a different machine, this is the actual checklist, in the order you'll hit it — not a
+list of known bugs, just unverified ground:
+
+1. **Backend compiles.** `mvn` isn't installed on the machine this was built on, so
+   `DashboardApplication` has never actually been compiled, only read. Run `mvn compile` (or
+   build via IntelliJ) first and fix anything that doesn't build.
+2. **`docker compose up -d` brings up all three containers healthy** — `zap`, `juice-shop`,
+   `grafana`. Never actually executed.
+3. **Grafana reaches Postgres.** This needs the `pg_hba.conf`/`listen_addresses`/firewall
+   change described in step 2 of Setup above — without it, expect the Grafana datasource to
+   show a connection error. Also unverified: whether `${DB_PASSWORD}` actually expands inside
+   `grafana/provisioning/datasources/postgres.yml` on the `grafana/grafana-oss:latest` image —
+   if the datasource shows an auth failure even with networking fixed, check whether the
+   password came through empty/literal and set it directly in the Grafana UI as a fallback.
+4. **The "DevSecOps Scan Findings" dashboard loads without schema errors.** Hand-authored JSON
+   (see Known limitations) — if a panel complains on first load, it's likely a minor
+   schema-version mismatch, not a wrong query.
+5. **A real scan completes and lands in both places**: run one from `http://localhost:8081`
+   against `http://juice-shop:3000`, confirm rows appear via `GET /api/findings`, then confirm
+   the same data renders in the Grafana panels (donut/trend/table all populate, filters work).
+
+Once all five check out, the project is actually 100% functional, not just "should work."
+Update this section (or delete it) once verified.
 
 ## Project context
 
