@@ -1,0 +1,139 @@
+{
+  "uid": "devsecops-scan-findings",
+  "title": "DevSecOps Scan Findings",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "target_url",
+        "type": "query",
+        "label": "Target",
+        "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+        "query": "SELECT DISTINCT target_url FROM scan_findings ORDER BY 1",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "risk_level",
+        "type": "query",
+        "label": "Risk level",
+        "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+        "query": "SELECT DISTINCT risk_level FROM scan_findings ORDER BY 1",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "scan_type",
+        "type": "query",
+        "label": "Scan type",
+        "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+        "query": "SELECT DISTINCT scan_type FROM scan_findings ORDER BY 1",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Findings",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS \"Total\" FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "High Risk (last 7 days)",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS \"High (7d)\" FROM scan_findings WHERE risk_level = 'High' AND detected_at >= NOW() - INTERVAL '7 days' AND target_url IN ($target_url)"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "piechart",
+      "title": "Findings by Risk Level",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+        "pieType": "donut"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT risk_level AS metric, COUNT(*) AS value FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) GROUP BY risk_level ORDER BY value DESC"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Findings Over Time",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('day', detected_at) AS time, risk_level, COUNT(*) AS count FROM scan_findings WHERE target_url IN ($target_url) AND risk_level IN ($risk_level) AND scan_type IN ($scan_type) GROUP BY 1, risk_level ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "All Findings",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 10 },
+      "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT detected_at AS \"Detected At\", target_url AS \"Target\", scan_type AS \"Type\", risk_level AS \"Risk\", alert_name AS \"Alert\", cwe_id AS \"CWE\", affected_url AS \"Affected URL\" FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) ORDER BY detected_at DESC LIMIT 500"
+        }
+      ]
+    }
+  ]
+}

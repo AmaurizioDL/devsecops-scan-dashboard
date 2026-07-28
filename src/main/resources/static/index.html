@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DevSecOps Scan Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    max-width: 720px;
+    margin: 3rem auto;
+    padding: 0 1.5rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  p.sub { color: #888; margin-top: 0; }
+  fieldset { border: 1px solid #8883; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+  label { display: block; margin: 0.5rem 0; }
+  input[type="text"] { width: 100%; padding: 0.5rem; box-sizing: border-box; font-size: 1rem; }
+  .risk-levels { display: flex; gap: 1.5rem; margin-top: 0.5rem; }
+  .risk-levels label { display: flex; align-items: center; gap: 0.4rem; margin: 0; }
+  button {
+    padding: 0.6rem 1.4rem;
+    font-size: 1rem;
+    border-radius: 6px;
+    border: none;
+    background: #2f6feb;
+    color: white;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: wait; }
+  #status { margin-top: 1rem; font-weight: 600; }
+  pre#result {
+    background: #8881;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+    max-height: 400px;
+    font-size: 0.85rem;
+  }
+  .links { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #8883; }
+  .links a { color: #2f6feb; }
+</style>
+</head>
+<body>
+
+<h1>DevSecOps Scan Dashboard</h1>
+<p class="sub">Trigger an OWASP ZAP spider + active scan and store the findings in Postgres.</p>
+
+<form id="scan-form">
+  <label for="targetUrl">Target URL</label>
+  <input type="text" id="targetUrl" name="targetUrl" placeholder="http://juice-shop:3000" required>
+
+  <fieldset>
+    <legend>Risk levels to scan (leave all unchecked for full coverage)</legend>
+    <div class="risk-levels">
+      <label><input type="checkbox" name="riskLevel" value="HIGH"> HIGH</label>
+      <label><input type="checkbox" name="riskLevel" value="MEDIUM"> MEDIUM</label>
+      <label><input type="checkbox" name="riskLevel" value="LOW"> LOW</label>
+    </div>
+  </fieldset>
+
+  <button type="submit" id="submit-btn">Run scan</button>
+</form>
+
+<div id="status"></div>
+<pre id="result" hidden></pre>
+
+<div class="links">
+  <a href="http://localhost:3001/d/devsecops-scan-findings" target="_blank" rel="noopener">
+    Open Grafana dashboard &rarr;
+  </a>
+  <br>
+  <a href="/api/findings" target="_blank" rel="noopener">View raw findings (JSON) &rarr;</a>
+</div>
+
+<script>
+const form = document.getElementById('scan-form');
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const submitBtn = document.getElementById('submit-btn');
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const targetUrl = document.getElementById('targetUrl').value.trim();
+  const riskLevels = Array.from(form.querySelectorAll('input[name="riskLevel"]:checked'))
+    .map((el) => el.value)
+    .join(',');
+
+  const params = new URLSearchParams({ targetUrl });
+  if (riskLevels) {
+    params.set('riskLevels', riskLevels);
+  }
+
+  submitBtn.disabled = true;
+  resultEl.hidden = true;
+  statusEl.textContent = 'Scanning... this runs synchronously (spider + active scan) and can take a while.';
+
+  try {
+    const response = await fetch(`/api/scans?${params.toString()}`, { method: 'POST' });
+    const body = await response.json();
+
+    if (!response.ok) {
+      statusEl.textContent = `Error (HTTP ${response.status})`;
+      resultEl.textContent = JSON.stringify(body, null, 2);
+      resultEl.hidden = false;
+      return;
+    }
+
+    statusEl.textContent = `Done — ${body.length} finding(s) saved in this run.`;
+    resultEl.textContent = JSON.stringify(body, null, 2);
+    resultEl.hidden = false;
+  } catch (err) {
+    statusEl.textContent = `Request failed: ${err.message}`;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+</script>
+
+</body>
+</html>

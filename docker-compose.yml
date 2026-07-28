@@ -22,6 +22,31 @@ services:
       - devsecops-net
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      # Password for the Grafana "admin" web UI login (not related to Postgres).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Read by grafana/provisioning/datasources/postgres.yml to reach the native
+      # Windows Postgres instance — same credential the backend uses (see .env.example).
+      - DB_PASSWORD=${DB_PASSWORD:-changeme}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    networks:
+      - devsecops-net
+    restart: unless-stopped
+    # Postgres runs natively on the Windows host, not in this compose file —
+    # host.docker.internal is how Docker Desktop lets containers reach it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 networks:
   devsecops-net:
     name: devsecops-net
+
+volumes:
+  grafana-data:
