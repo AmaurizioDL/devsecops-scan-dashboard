@@ -60,7 +60,14 @@ a deliberate choice for this learning project, not an oversight.
 
 ## Setup
 
-### 1. Provision PostgreSQL first
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/AmaurizioDL/devsecops-scan-dashboard.git
+cd devsecops-scan-dashboard
+```
+
+### 2. Provision PostgreSQL first
 
 Create the database and table (adjust `psql` connection flags as needed for your local setup):
 
@@ -70,9 +77,9 @@ psql -U postgres -d devsecops_dashboard -f db/schema.sql
 ```
 
 Grafana's datasource is provisioned against this database on container start, so it needs to
-exist (even if empty) before step 2.
+exist (even if empty) before step 3.
 
-### 2. Configure credentials
+### 3. Configure credentials
 
 Copy `.env.example` to `.env` and fill in your real Postgres password — `docker compose`
 reads `.env` automatically to fill in `${DB_PASSWORD}` / `${GRAFANA_ADMIN_PASSWORD}` in
@@ -84,7 +91,7 @@ cp .env.example .env
 ```
 
 Spring Boot does **not** read `.env` — separately export the same values in your shell (or set
-them in your IntelliJ Run Configuration) before running the backend in step 4:
+them in your IntelliJ Run Configuration) before running the backend in step 5:
 
 ```bash
 # bash
@@ -101,7 +108,7 @@ $env:DB_PASSWORD = "your_local_postgres_password"
 If unset, they default to `postgres` / `changeme`, which will fail auth against a real
 instance — that's intentional, it forces you to set a real password rather than committing one.
 
-### 3. Start ZAP + Juice Shop + Grafana
+### 4. Start ZAP + Juice Shop + Grafana
 
 ```bash
 docker compose up -d
@@ -120,7 +127,7 @@ Open Grafana at **http://localhost:3001** (login `admin` / the `GRAFANA_ADMIN_PA
 set, default `admin`). The "DevSecOps Scan Findings" dashboard and its Postgres datasource are
 already provisioned — no manual setup needed. It'll be empty until you run a scan.
 
-### 4. Run the backend
+### 5. Run the backend
 
 ```bash
 mvn spring-boot:run
@@ -132,7 +139,7 @@ exported).
 
 The app starts on `http://localhost:8081`.
 
-### 5. Run a scan
+### 6. Run a scan
 
 Open **http://localhost:8081** — the trigger page served by the backend. Enter a target URL
 (e.g. `http://juice-shop:3000`), optionally check specific risk levels, and click "Run scan".
@@ -157,7 +164,7 @@ This call is synchronous and blocks until the spider and active scan both comple
 full-coverage scan against Juice Shop this can take a while and is memory-intensive (see
 Known limitations below).
 
-### 6. View the results
+### 7. View the results
 
 - **Grafana** (http://localhost:3001) — the "DevSecOps Scan Findings" dashboard: severity
   breakdown donut, findings-over-time trend, stat cards, and a filterable table, with
