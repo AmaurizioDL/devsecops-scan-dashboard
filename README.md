@@ -165,6 +165,21 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 | GET    | `/api/findings` | Returns all stored findings, most recent first.                        |
 | GET    | `/`             | Static HTML page to trigger a scan and link out to Grafana.            |
 
+## Tests
+
+Unit tests (JUnit 5 + Mockito + AssertJ, no Docker/database required) cover the business logic
+that matters most for correctness: the ZAP alert → `ScanFinding` mapping (including CWE-id edge
+cases: null/negative/non-numeric values), passive-vs-active dedup by alert id, the scan-timeout
+guard, `targetUrl`/`riskLevels` request validation in `ScanController`, and the risk-level →
+ZAP-scanner-id catalog.
+
+```bash
+mvn test
+```
+
+The `Dockerfile` also runs `mvn package` (not `-DskipTests`), so `docker compose up --build`
+won't produce a `backend` image if a test fails.
+
 ## Known limitations / deliberate scope cuts
 
 - `POST /api/scans` is synchronous/blocking — running it as an async job (e.g. returning a
