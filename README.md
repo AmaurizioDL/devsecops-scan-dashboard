@@ -12,51 +12,58 @@ mirrors the pattern used by real AppSec tools like DefectDojo, OWASP Dependency-
 GitLab's Security Dashboard. A minimal static page (served by Spring Boot itself) covers the
 one thing Grafana can't do: triggering a scan.
 
+Everything runs in Docker — clone the repo, `docker compose up`, done. No native database
+install, no host-level Java/Maven required.
+
 ## Architecture
 
 ```
- ┌──────────────┐   HTTP (ZAP API, localhost:8080)   ┌──────────────┐
- │ Spring Boot  │ ───────────────────────────────────▶│  ZAP (zap)   │
- │ backend      │                                      │  Docker      │
- │ (host, :8081)│                                      │  container   │
- │ + static     │                                      └──────┬───────┘
- │   trigger    │                                             │ scans over
- │   page (/)   │                                             │ devsecops-net
- └──────┬───────┘                                      ┌───────▼──────┐
-        │ JDBC (localhost:5432)                        │ juice-shop   │
-        ▼                                               │ Docker       │
- ┌──────────────┐   Postgres datasource                │ container    │
- │ PostgreSQL 18 │◀──────────────────────────┐          └──────────────┘
- │ (native       │                            │
- │  Windows svc) │                    ┌───────┴──────┐
- └──────────────┘                    │ Grafana       │
-                                      │ Docker        │
-                                      │ container     │
-                                      │ (:3001)       │
-                                      └───────────────┘
+                          devsecops-net (Docker bridge network)
+
+ ┌──────────────┐   HTTP (ZAP API)      ┌──────────────┐
+ │  backend      │ ─────────────────────▶│  zap         │
+ │  (Spring Boot,│                        │  Docker      │
+ │  container,   │                        │  container   │
+ │  :8081)       │                        └──────┬───────┘
+ │  + static     │                               │ scans over
+ │  trigger page │                               │ devsecops-net
+ │  (/)          │                        ┌───────▼──────┐
+ └──────┬────────┘                        │ juice-shop   │
+        │ JDBC (postgres:5432)            │ Docker       │
+        ▼                                 │ container    │
+ ┌──────────────┐   Postgres datasource   └──────────────┘
+ │ postgres      │◀──────────────────────────┐
+ │ Docker        │                            │
+ │ container     │                    ┌───────┴──────┐
+ └──────────────┘                     │ grafana       │
+                                       │ Docker        │
+                                       │ container     │
+                                       │ (:3001)       │
+                                       └───────────────┘
 ```
 
-- **ZAP** and **juice-shop** run in Docker, on a shared bridge network `devsecops-net`, so ZAP
+- **zap** and **juice-shop** run in Docker on a shared bridge network `devsecops-net`, so ZAP
   reaches the target by container name (e.g. `http://juice-shop:3000`).
-- **PostgreSQL** runs natively on the host (not containerized) — the backend and Grafana both
-  connect to it (backend over `localhost:5432`, Grafana over `host.docker.internal:5432` since
-  it's inside Docker).
-- The **Spring Boot backend** runs on the host too, and talks to ZAP's REST API on
-  `localhost:8080` (exposed by the container). It also serves a static HTML page at `/` for
-  triggering scans.
-- **Grafana** runs in Docker, provisioned as code (`grafana/provisioning/`) — datasource and
-  dashboard load automatically on `docker compose up`, no manual clicking required.
+- **postgres** runs in Docker too (official `postgres` image), with its schema
+  (`db/schema.sql`) auto-applied on first start via the Postgres image's
+  `/docker-entrypoint-initdb.d/` convention, and its data persisted in a named volume
+  (`pgdata`) so it survives `docker compose down` (but not `down -v`).
+- The **backend** (Spring Boot) is built and run from its own `Dockerfile`, and reaches
+  Postgres and ZAP by container name (`postgres:5432`, `http://zap:8080`) over
+  `devsecops-net`. It also serves a static HTML page at `/` for triggering scans.
+- **grafana** runs in Docker, provisioned as code (`grafana/provisioning/`) — datasource and
+  dashboard load automatically on `docker compose up`, no manual clicking required, and it
+  reaches Postgres the same way the backend does: by container name on `devsecops-net`.
 
-This split (native Postgres + host-run backend + containerized scan targets/engine/Grafana) is
-a deliberate choice for this learning project, not an oversight.
+All five services are defined in a single `docker-compose.yml` — one command brings up the
+whole stack on any machine with Docker installed.
 
 ## Prerequisites
 
-- Docker Desktop
-- Java 21 (JDK)
-- Maven (or run/debug the `DashboardApplication` main class straight from IntelliJ, which
-  bundles its own Maven — no separate install needed if you're using the IDE)
-- PostgreSQL 18 installed natively (not in Docker)
+- Docker Desktop (or Docker Engine + Compose v2) — that's it.
+- Java 21 + Maven are only needed if you want to run the backend *outside* Docker (e.g. from
+  IntelliJ) against the dockerized Postgres/ZAP — see "Alternative: run the backend outside
+  Docker" below.
 
 ## Setup
 
@@ -67,81 +74,34 @@ git clone https://github.com/AmaurizioDL/devsecops-scan-dashboard.git
 cd devsecops-scan-dashboard
 ```
 
-### 2. Provision PostgreSQL first
+### 2. Configure credentials
 
-Create the database and table (adjust `psql` connection flags as needed for your local setup):
-
-```bash
-createdb -U postgres devsecops_dashboard
-psql -U postgres -d devsecops_dashboard -f db/schema.sql
-```
-
-Grafana's datasource is provisioned against this database on container start, so it needs to
-exist (even if empty) before step 3.
-
-**Also required — let Grafana (in Docker) reach this native Postgres:** a fresh PostgreSQL
-install usually only listens on `localhost` and only allows connections from `127.0.0.1` in
-`pg_hba.conf`. Grafana connects from inside a Docker container via `host.docker.internal`,
-which does **not** count as localhost from Postgres's point of view — without this change the
-Grafana datasource will fail to connect (untested on this repo so far; see "Project status"
-below).
-
-1. Locate `postgresql.conf` and `pg_hba.conf` (typically
-   `C:\Program Files\PostgreSQL\18\data\` on Windows).
-2. In `postgresql.conf`, set `listen_addresses = '*'` (default is usually `'localhost'`).
-3. In `pg_hba.conf`, add a line allowing Docker Desktop's internal network to authenticate:
-   ```
-   host    devsecops_dashboard    postgres    172.16.0.0/12    scram-sha-256
-   ```
-   `172.16.0.0/12` covers Docker's default bridge/WSL2 ranges. If Grafana still can't connect,
-   check the Postgres log for the actual source IP being rejected and narrow/widen the range
-   accordingly — this is local-only dev, so a broader range (or even `0.0.0.0/0`, given the
-   Postgres port isn't published outside this machine) is an acceptable fallback if needed.
-4. Restart the PostgreSQL service (`Restart-Service postgresql-x64-18` in an elevated
-   PowerShell, or via Services.msc) and confirm Windows Firewall isn't blocking inbound
-   connections on port 5432 from the Docker virtual network.
-
-### 3. Configure credentials
-
-Copy `.env.example` to `.env` and fill in your real Postgres password — `docker compose`
-reads `.env` automatically to fill in `${DB_PASSWORD}` / `${GRAFANA_ADMIN_PASSWORD}` in
-`docker-compose.yml` (used by the Grafana container):
+Copy `.env.example` to `.env`. The defaults work out of the box for local use (they're read by
+every service in `docker-compose.yml`, including Postgres itself, so backend/Grafana/Postgres
+always agree on the same credentials):
 
 ```bash
 cp .env.example .env
-# edit .env: set DB_PASSWORD to your real local Postgres password
+# optional: edit .env to set your own DB_PASSWORD / GRAFANA_ADMIN_PASSWORD
 ```
 
-Spring Boot does **not** read `.env` — separately export the same values in your shell (or set
-them in your IntelliJ Run Configuration) before running the backend in step 5:
+### 3. Start the full stack
 
 ```bash
-# bash
-export DB_USERNAME=postgres
-export DB_PASSWORD=your_local_postgres_password
+docker compose up -d --build
+docker ps   # should show "zap", "juice-shop", "postgres", "backend", and "grafana" running
 ```
 
-```powershell
-# PowerShell
-$env:DB_USERNAME = "postgres"
-$env:DB_PASSWORD = "your_local_postgres_password"
-```
-
-If unset, they default to `postgres` / `changeme`, which will fail auth against a real
-instance — that's intentional, it forces you to set a real password rather than committing one.
-
-### 4. Start ZAP + Juice Shop + Grafana
-
-```bash
-docker compose up -d
-docker ps   # should show "zap", "juice-shop", and "grafana" as running
-```
+`--build` is only needed the first time (or after changing backend source) — it builds the
+backend image from the `Dockerfile`. Postgres's schema is applied automatically on first boot;
+the backend waits for Postgres to report healthy before starting.
 
 Sanity checks:
 
 ```bash
 curl http://localhost:8080          # ZAP daemon responding
 curl -I http://localhost:3000       # Juice Shop responding
+curl -I http://localhost:8081       # Backend responding
 curl -I http://localhost:3001       # Grafana responding
 ```
 
@@ -149,19 +109,7 @@ Open Grafana at **http://localhost:3001** (login `admin` / the `GRAFANA_ADMIN_PA
 set, default `admin`). The "DevSecOps Scan Findings" dashboard and its Postgres datasource are
 already provisioned — no manual setup needed. It'll be empty until you run a scan.
 
-### 5. Run the backend
-
-```bash
-mvn spring-boot:run
-```
-
-or run `DashboardApplication` directly from IntelliJ (same environment variables need to be
-set in the Run Configuration if you're not launching from a shell that already has them
-exported).
-
-The app starts on `http://localhost:8081`.
-
-### 6. Run a scan
+### 4. Run a scan
 
 Open **http://localhost:8081** — the trigger page served by the backend. Enter a target URL
 (e.g. `http://juice-shop:3000`), optionally check specific risk levels, and click "Run scan".
@@ -176,7 +124,7 @@ Note `targetUrl` uses the **container name** (`juice-shop`), not `localhost` —
 it via the `devsecops-net` Docker network, not from the host.
 
 Optional: restrict the active scan to specific risk categories (see
-`ZapScannerRiskCatalog`) to shorten scan time:
+`ZapScannerRiskCatalog`) to shorten scan time and reduce memory pressure:
 
 ```bash
 curl -X POST "http://localhost:8081/api/scans?targetUrl=http://juice-shop:3000&riskLevels=HIGH,MEDIUM"
@@ -186,13 +134,28 @@ This call is synchronous and blocks until the spider and active scan both comple
 full-coverage scan against Juice Shop this can take a while and is memory-intensive (see
 Known limitations below).
 
-### 7. View the results
+### 5. View the results
 
 - **Grafana** (http://localhost:3001) — the "DevSecOps Scan Findings" dashboard: severity
   breakdown donut, findings-over-time trend, stat cards, and a filterable table, with
   dashboard variables to filter by target/risk level/scan type.
 - **Raw JSON**: `curl http://localhost:8081/api/findings`, or the "View raw findings" link on
   the trigger page.
+
+### Alternative: run the backend outside Docker
+
+If you're actively developing the backend and want faster iteration than rebuilding the
+image each time, you can leave `zap`, `juice-shop`, `postgres`, and `grafana` in Docker
+(`docker compose up -d zap juice-shop postgres grafana`) and run the backend from your host
+instead:
+
+```bash
+export DB_USERNAME=postgres DB_PASSWORD=changeme   # match your .env
+mvn spring-boot:run
+```
+
+This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_BASE_URL` to
+`localhost`, and Postgres/ZAP both publish their ports to the host in `docker-compose.yml`.
 
 ## API
 
@@ -209,46 +172,24 @@ Known limitations below).
 - Endpoints return the `ScanFinding` JPA entity directly as JSON — introducing request/response
   DTOs is a documented future improvement.
 - The ZAP active scan is CPU/memory-intensive. On low-resource machines it can consume
-  available memory quickly and slow the whole system down — this project was moved off a
-  memory-constrained laptop for that reason. Run it on a machine with a reasonable amount of
-  free RAM (8GB+ recommended for Docker Desktop + ZAP + Juice Shop + the JVM backend
-  simultaneously), or scope scans down with `riskLevels` to reduce the number of active
-  scanners running.
-- The dashboard JSON (`grafana/provisioning/dashboards/json/scan-findings.json`) was authored
-  by hand rather than exported from a running Grafana instance (this project is built/pushed
-  from a machine that can't run the full stack — see above). Layout/queries are correct, but
-  minor panel-schema quirks may need a small tweak the first time it's actually loaded.
+  available memory quickly and slow the whole system down. Run it on a machine with a
+  reasonable amount of free RAM (8GB+ recommended for Docker Desktop + ZAP + Juice Shop + the
+  backend container simultaneously), or scope scans down with `riskLevels` to reduce the
+  number of active scanners running.
+- `pgdata` and `grafana-data` are named Docker volumes — `docker compose down` keeps them,
+  `docker compose down -v` deletes findings/dashboards state along with the containers.
 
-## Project status — what to verify first on a new machine
+## Project status
 
-Everything in this repo was written and pushed **from a memory-constrained laptop that could
-never actually run the stack** — running ZAP's spider/active scan there was slow enough to
-stall the whole machine. So the code, `docker-compose.yml`, and Grafana provisioning are
-believed correct (config was syntax-validated: `docker compose config`, and the dashboard JSON
-was checked for valid JSON) but **none of it has been run end-to-end**. If you're picking this
-up on a different machine, this is the actual checklist, in the order you'll hit it — not a
-list of known bugs, just unverified ground:
+The full stack — `zap`, `juice-shop`, `postgres`, `backend`, and `grafana` — has been run
+end-to-end via `docker compose up -d --build` on a dev machine: all five containers reach a
+healthy/running state, the backend connects to the dockerized Postgres and applies/validates
+the `scan_findings` schema on startup, the Grafana datasource connects to Postgres over the
+shared `devsecops-net` network without any host-networking workarounds, and a scan run through
+`/api/scans` produces rows visible in both `/api/findings` and the Grafana dashboard panels.
 
-1. **Backend compiles.** `mvn` isn't installed on the machine this was built on, so
-   `DashboardApplication` has never actually been compiled, only read. Run `mvn compile` (or
-   build via IntelliJ) first and fix anything that doesn't build.
-2. **`docker compose up -d` brings up all three containers healthy** — `zap`, `juice-shop`,
-   `grafana`. Never actually executed.
-3. **Grafana reaches Postgres.** This needs the `pg_hba.conf`/`listen_addresses`/firewall
-   change described in step 2 of Setup above — without it, expect the Grafana datasource to
-   show a connection error. Also unverified: whether `${DB_PASSWORD}` actually expands inside
-   `grafana/provisioning/datasources/postgres.yml` on the `grafana/grafana-oss:latest` image —
-   if the datasource shows an auth failure even with networking fixed, check whether the
-   password came through empty/literal and set it directly in the Grafana UI as a fallback.
-4. **The "DevSecOps Scan Findings" dashboard loads without schema errors.** Hand-authored JSON
-   (see Known limitations) — if a panel complains on first load, it's likely a minor
-   schema-version mismatch, not a wrong query.
-5. **A real scan completes and lands in both places**: run one from `http://localhost:8081`
-   against `http://juice-shop:3000`, confirm rows appear via `GET /api/findings`, then confirm
-   the same data renders in the Grafana panels (donut/trend/table all populate, filters work).
-
-Once all five check out, the project is actually 100% functional, not just "should work."
-Update this section (or delete it) once verified.
+Full-coverage active scans remain memory-intensive (see Known limitations) — for routine local
+verification, scoping with `riskLevels` is recommended over unscoped full scans.
 
 ## Project context
 

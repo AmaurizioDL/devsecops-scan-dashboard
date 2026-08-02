@@ -5,14 +5,16 @@ datasources:
     uid: devsecops-postgres
     type: postgres
     access: proxy
-    url: host.docker.internal:5432
+    # "postgres" is the container_name of the postgres service in
+    # docker-compose.yml, resolved via the shared devsecops-net network.
+    url: postgres:5432
     database: devsecops_dashboard
-    user: postgres
+    user: ${DB_USERNAME}
     isDefault: true
     editable: true
     jsonData:
       sslmode: disable
     secureJsonData:
-      # Expanded from the DB_PASSWORD env var set on the grafana container
-      # (see docker-compose.yml / .env.example).
+      # Expanded from the DB_USERNAME/DB_PASSWORD env vars set on the grafana
+      # container (see docker-compose.yml / .env.example).
       password: ${DB_PASSWORD}

@@ -22,6 +22,53 @@ services:
       - devsecops-net
     restart: unless-stopped
 
+  postgres:
+    image: postgres:18-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=devsecops_dashboard
+      - POSTGRES_USER=${DB_USERNAME:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      # postgres:18+ images store data at /var/lib/postgresql (not .../data)
+      # to support pg_ctlcluster-style major-version directories — see
+      # https://github.com/docker-library/postgres/pull/1259.
+      - pgdata:/var/lib/postgresql
+      # Runs automatically on first container start (empty data dir) — creates
+      # the scan_findings table so the app/Grafana have something to connect to.
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    networks:
+      - devsecops-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d devsecops_dashboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: .
+    container_name: backend
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=devsecops_dashboard
+      - DB_USERNAME=${DB_USERNAME:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-changeme}
+      - ZAP_BASE_URL=http://zap:8080
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      zap:
+        condition: service_started
+    networks:
+      - devsecops-net
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana
@@ -30,19 +77,19 @@ services:
     environment:
       # Password for the Grafana "admin" web UI login (not related to Postgres).
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      # Read by grafana/provisioning/datasources/postgres.yml to reach the native
-      # Windows Postgres instance — same credential the backend uses (see .env.example).
+      # Read by grafana/provisioning/datasources/postgres.yml to reach the
+      # dockerized Postgres service (same devsecops-net network).
+      - DB_USERNAME=${DB_USERNAME:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-changeme}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - grafana-data:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - devsecops-net
     restart: unless-stopped
-    # Postgres runs natively on the Windows host, not in this compose file —
-    # host.docker.internal is how Docker Desktop lets containers reach it.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
 networks:
   devsecops-net:
@@ -50,3 +97,4 @@ networks:
 
 volumes:
   grafana-data:
+  pgdata:

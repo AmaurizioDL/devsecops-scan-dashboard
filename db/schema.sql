@@ -1,5 +1,8 @@
--- Ejecutar contra la base de datos devsecops_dashboard (crearla antes si no existe):
---   CREATE DATABASE devsecops_dashboard;
+-- Este archivo se monta en /docker-entrypoint-initdb.d/ y el contenedor de
+-- Postgres lo ejecuta automaticamente la primera vez que arranca (data dir
+-- vacio) contra la base devsecops_dashboard, ya creada via POSTGRES_DB
+-- (ver docker-compose.yml). No hace falta correrlo a mano salvo que estes
+-- apuntando a un Postgres fuera de docker compose.
 --
 -- spring.jpa.hibernate.ddl-auto=validate, así que Hibernate no crea ni altera
 -- esta tabla: debe existir de antemano exactamente con esta forma.
