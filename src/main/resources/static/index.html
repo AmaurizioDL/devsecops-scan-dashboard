@@ -20,6 +20,7 @@
   input[type="text"] { width: 100%; padding: 0.5rem; box-sizing: border-box; font-size: 1rem; }
   .risk-levels { display: flex; gap: 1.5rem; margin-top: 0.5rem; }
   .risk-levels label { display: flex; align-items: center; gap: 0.4rem; margin: 0; }
+  .actions { display: flex; gap: 0.75rem; align-items: center; }
   button {
     padding: 0.6rem 1.4rem;
     font-size: 1rem;
@@ -30,7 +31,11 @@
     cursor: pointer;
   }
   button:disabled { opacity: 0.6; cursor: wait; }
+  button#stop-btn { background: #d1394a; }
   #status { margin-top: 1rem; font-weight: 600; }
+  #progress-section { margin-top: 1rem; }
+  #scan-progress { width: 100%; height: 1.1rem; }
+  #progress-info { margin-top: 0.4rem; color: #888; font-size: 0.9rem; }
   pre#result {
     background: #8881;
     border-radius: 8px;
@@ -61,10 +66,17 @@
     </div>
   </fieldset>
 
-  <button type="submit" id="submit-btn">Run scan</button>
+  <div class="actions">
+    <button type="submit" id="submit-btn">Run scan</button>
+    <button type="button" id="stop-btn" hidden>Detener scan</button>
+  </div>
 </form>
 
 <div id="status"></div>
+<div id="progress-section" hidden>
+  <progress id="scan-progress" value="0" max="100"></progress>
+  <div id="progress-info"></div>
+</div>
 <pre id="result" hidden></pre>
 
 <div class="links">
@@ -80,6 +92,89 @@ const form = document.getElementById('scan-form');
 const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
 const submitBtn = document.getElementById('submit-btn');
+const stopBtn = document.getElementById('stop-btn');
+const progressSection = document.getElementById('progress-section');
+const progressBar = document.getElementById('scan-progress');
+const progressInfo = document.getElementById('progress-info');
+
+const PHASE_LABELS = {
+  SPIDER: 'Fase 1/2 — Rastreo (spider)',
+  ACTIVE_SCAN: 'Fase 2/2 — Escaneo activo',
+};
+
+let pollHandle = null;
+let currentScanId = null;
+
+function formatDuration(totalSeconds) {
+  if (totalSeconds === null || totalSeconds === undefined) {
+    return 'calculando…';
+  }
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  const mm = Math.floor(seconds / 60);
+  const ss = seconds % 60;
+  return `${mm}:${String(ss).padStart(2, '0')}`;
+}
+
+function stopPolling() {
+  if (pollHandle) {
+    clearInterval(pollHandle);
+    pollHandle = null;
+  }
+}
+
+function resetForNextScan() {
+  stopPolling();
+  currentScanId = null;
+  submitBtn.disabled = false;
+  stopBtn.hidden = true;
+  stopBtn.disabled = false;
+  progressSection.hidden = true;
+}
+
+function renderRunningState(run) {
+  progressSection.hidden = false;
+  progressBar.value = run.percent;
+  const phaseLabel = PHASE_LABELS[run.phase] || run.phase;
+  progressInfo.textContent =
+    `${phaseLabel} — ${run.percent}% • ETA: ${formatDuration(run.etaSeconds)} • Transcurrido: ${formatDuration(run.elapsedSeconds)}`;
+}
+
+async function pollScanStatus(scanId) {
+  try {
+    const response = await fetch(`/api/scans/${scanId}`);
+    if (!response.ok) {
+      statusEl.textContent = `Error consultando el estado del scan (HTTP ${response.status})`;
+      resetForNextScan();
+      return;
+    }
+    const run = await response.json();
+
+    if (run.phase === 'SPIDER' || run.phase === 'ACTIVE_SCAN') {
+      statusEl.textContent = 'Scan en progreso…';
+      renderRunningState(run);
+      return;
+    }
+
+    // Terminal state: DONE, STOPPED or FAILED.
+    progressSection.hidden = true;
+    if (run.phase === 'DONE') {
+      statusEl.textContent = `Done — ${run.findings.length} finding(s) saved in this run.`;
+      resultEl.textContent = JSON.stringify(run.findings, null, 2);
+      resultEl.hidden = false;
+    } else if (run.phase === 'STOPPED') {
+      statusEl.textContent = `Scan detenido por el usuario — ${run.findings.length} finding(s) guardado(s) antes de detenerlo.`;
+      resultEl.textContent = JSON.stringify(run.findings, null, 2);
+      resultEl.hidden = false;
+    } else {
+      statusEl.textContent = `Scan fallido: ${run.errorMessage || 'error desconocido'}`;
+      resultEl.hidden = true;
+    }
+    resetForNextScan();
+  } catch (err) {
+    statusEl.textContent = `Request failed: ${err.message}`;
+    resetForNextScan();
+  }
+}
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -96,26 +191,39 @@ form.addEventListener('submit', async (event) => {
 
   submitBtn.disabled = true;
   resultEl.hidden = true;
-  statusEl.textContent = 'Scanning... this runs synchronously (spider + active scan) and can take a while.';
+  statusEl.textContent = 'Iniciando scan…';
 
   try {
     const response = await fetch(`/api/scans?${params.toString()}`, { method: 'POST' });
     const body = await response.json();
 
     if (!response.ok) {
-      statusEl.textContent = `Error (HTTP ${response.status})`;
-      resultEl.textContent = JSON.stringify(body, null, 2);
-      resultEl.hidden = false;
+      statusEl.textContent = `Error (HTTP ${response.status}) — ${body.detail || ''}`;
+      submitBtn.disabled = false;
       return;
     }
 
-    statusEl.textContent = `Done — ${body.length} finding(s) saved in this run.`;
-    resultEl.textContent = JSON.stringify(body, null, 2);
-    resultEl.hidden = false;
+    currentScanId = body.scanId;
+    stopBtn.hidden = false;
+    renderRunningState(body);
+    pollHandle = setInterval(() => pollScanStatus(currentScanId), 1500);
   } catch (err) {
     statusEl.textContent = `Request failed: ${err.message}`;
-  } finally {
     submitBtn.disabled = false;
+  }
+});
+
+stopBtn.addEventListener('click', async () => {
+  if (!currentScanId) {
+    return;
+  }
+  stopBtn.disabled = true;
+  statusEl.textContent = 'Deteniendo scan…';
+  try {
+    await fetch(`/api/scans/${currentScanId}/stop`, { method: 'POST' });
+  } catch (err) {
+    statusEl.textContent = `No se pudo detener el scan: ${err.message}`;
+    stopBtn.disabled = false;
   }
 });
 </script>

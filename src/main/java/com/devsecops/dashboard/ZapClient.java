@@ -62,6 +62,22 @@ public class ZapClient {
         return parseStatus(response.status());
     }
 
+    public void stopSpiderScan(String scanId) {
+        restClient.get()
+                .uri(uriBuilder -> withApiKey(uriBuilder.path("/JSON/spider/action/stop/")
+                        .queryParam("scanId", scanId)).build())
+                .retrieve()
+                .toBodilessEntity();
+    }
+
+    public void stopActiveScan(String scanId) {
+        restClient.get()
+                .uri(uriBuilder -> withApiKey(uriBuilder.path("/JSON/ascan/action/stop/")
+                        .queryParam("scanId", scanId)).build())
+                .retrieve()
+                .toBodilessEntity();
+    }
+
     /**
      * Restringe el active scan a solo los scanners cuya categoria de riesgo (segun
      * ZapScannerRiskCatalog) este en riskLevels. Si riskLevels es null o vacio,

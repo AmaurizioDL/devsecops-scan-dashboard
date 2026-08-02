@@ -1,8 +1,10 @@
 package com.devsecops.dashboard;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,10 +29,35 @@ public class ScanController {
     }
 
     @PostMapping("/api/scans")
-    public List<ScanFinding> runScan(@RequestParam String targetUrl,
-                                       @RequestParam(required = false) String riskLevels) {
+    public ResponseEntity<ScanRunView> startScan(@RequestParam String targetUrl,
+                                                  @RequestParam(required = false) String riskLevels) {
         validateTargetUrl(targetUrl);
-        return scanService.runFullScan(targetUrl, parseRiskLevels(riskLevels));
+        Set<ScanRiskLevel> parsedRiskLevels = parseRiskLevels(riskLevels);
+        try {
+            ScanRun run = scanService.startScan(targetUrl, parsedRiskLevels);
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(ScanRunView.from(run));
+        } catch (ScanAlreadyRunningException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
+    @GetMapping("/api/scans/{scanId}")
+    public ScanRunView getScanStatus(@PathVariable String scanId) {
+        return scanService.findRun(scanId)
+                .map(ScanRunView::from)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Scan no encontrado: " + scanId));
+    }
+
+    @PostMapping("/api/scans/{scanId}/stop")
+    public ScanRunView stopScan(@PathVariable String scanId) {
+        try {
+            scanService.requestStop(scanId);
+        } catch (ScanNotFoundException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+        return scanService.findRun(scanId)
+                .map(ScanRunView::from)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Scan no encontrado: " + scanId));
     }
 
     /**

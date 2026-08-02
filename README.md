@@ -113,11 +113,21 @@ already provisioned — no manual setup needed. It'll be empty until you run a s
 
 Open **http://localhost:8081** — the trigger page served by the backend. Enter a target URL
 (e.g. `http://juice-shop:3000`), optionally check specific risk levels, and click "Run scan".
+The scan runs in the background: the page polls scan status every ~1.5s and shows a progress
+bar (per phase — spider, then active scan), an ETA, and a "Detener scan" button to cancel it
+mid-run.
 
-Or via curl:
+Or via curl. `POST /api/scans` returns immediately with a `scanId`:
 
 ```bash
 curl -X POST "http://localhost:8081/api/scans?targetUrl=http://juice-shop:3000"
+# {"scanId":"...", "phase":"SPIDER", "percent":0, ...}
+
+curl "http://localhost:8081/api/scans/<scanId>"
+# poll this — phase moves SPIDER -> ACTIVE_SCAN -> DONE, percent/etaSeconds update each call
+
+curl -X POST "http://localhost:8081/api/scans/<scanId>/stop"
+# cancels the running scan; whatever findings existed at that point are still saved
 ```
 
 Note `targetUrl` uses the **container name** (`juice-shop`), not `localhost` — ZAP resolves
@@ -130,9 +140,10 @@ Optional: restrict the active scan to specific risk categories (see
 curl -X POST "http://localhost:8081/api/scans?targetUrl=http://juice-shop:3000&riskLevels=HIGH,MEDIUM"
 ```
 
-This call is synchronous and blocks until the spider and active scan both complete — for a
-full-coverage scan against Juice Shop this can take a while and is memory-intensive (see
-Known limitations below).
+Only one scan runs at a time (matches how ZAP itself works) — a second `POST /api/scans` while
+one is in progress gets `409 Conflict`. A full-coverage scan against Juice Shop can still take a
+while and is memory-intensive (see Known limitations below); `riskLevels` or the stop button are
+the ways to cut that short.
 
 ### 5. View the results
 
@@ -159,19 +170,23 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 
 ## API
 
-| Method | Path            | Description                                                             |
-|--------|-----------------|--------------------------------------------------------------------------|
-| POST   | `/api/scans`    | Runs spider + active scan against `targetUrl` (required query param), optionally scoped by `riskLevels` (comma-separated `HIGH,MEDIUM,LOW`). Returns the findings saved during this run. |
-| GET    | `/api/findings` | Returns all stored findings, most recent first.                        |
-| GET    | `/`             | Static HTML page to trigger a scan and link out to Grafana.            |
+| Method | Path                       | Description                                                             |
+|--------|----------------------------|--------------------------------------------------------------------------|
+| POST   | `/api/scans`               | Starts a spider + active scan against `targetUrl` (required query param) in the background, optionally scoped by `riskLevels` (comma-separated `HIGH,MEDIUM,LOW`). Returns `202` with the initial scan status immediately; `409` if a scan is already running. |
+| GET    | `/api/scans/{scanId}`      | Current status of a scan: `phase` (`SPIDER`/`ACTIVE_SCAN`/`DONE`/`STOPPED`/`FAILED`), `percent`, `etaSeconds` (nullable), `elapsedSeconds`, and `findings` (once `DONE`/`STOPPED`). `404` once a newer scan has replaced it — only the current/last scan is tracked. |
+| POST   | `/api/scans/{scanId}/stop` | Requests cancellation of a running scan. Findings already collected at that point are still saved (phase becomes `STOPPED`). `404` if unknown. |
+| GET    | `/api/findings`            | Returns all stored findings, most recent first.                        |
+| GET    | `/`                        | Static HTML page to trigger a scan and link out to Grafana.            |
 
 ## Tests
 
 Unit tests (JUnit 5 + Mockito + AssertJ, no Docker/database required) cover the business logic
 that matters most for correctness: the ZAP alert → `ScanFinding` mapping (including CWE-id edge
 cases: null/negative/non-numeric values), passive-vs-active dedup by alert id, the scan-timeout
-guard, `targetUrl`/`riskLevels` request validation in `ScanController`, and the risk-level →
-ZAP-scanner-id catalog.
+guard, `targetUrl`/`riskLevels` request validation in `ScanController`, the risk-level →
+ZAP-scanner-id catalog, the sliding-window ETA calculation (`ScanProgressEstimator`), the
+single-current-scan conflict rule (`ScanRunRegistry`), and stopping a scan mid-spider or
+mid-active-scan (partial findings still saved, ZAP's stop action called).
 
 ```bash
 mvn test
@@ -182,10 +197,19 @@ won't produce a `backend` image if a test fails.
 
 ## Known limitations / deliberate scope cuts
 
-- `POST /api/scans` is synchronous/blocking — running it as an async job (e.g. returning a
-  scan id immediately and polling for status) is a documented future improvement.
+- Only one scan runs at a time — there's a single tracked "current scan" slot, not a job queue.
+  This matches how ZAP itself and the project's usage pattern already work; a second
+  `POST /api/scans` while one is running gets `409 Conflict` instead of being queued.
+- Scan progress/state is in-memory only (`ScanRunRegistry`), not persisted. If the backend
+  restarts mid-scan, tracking is lost — ZAP itself keeps running the orphaned scan in that edge
+  case. Reconciling on startup is out of scope for now.
+- The ETA shown during a scan is a short-term extrapolation (recent %/second, via
+  `ScanProgressEstimator`), not a historical average per target — it can swing early in a
+  phase before enough samples accumulate ("calculando…" until then), and phase 2 (active scan)
+  restarts its own estimate from 0 rather than blending with phase 1's rate.
 - Endpoints return the `ScanFinding` JPA entity directly as JSON — introducing request/response
-  DTOs is a documented future improvement.
+  DTOs for the older endpoints is a documented future improvement (`ScanRunView`, used by the
+  newer scan-status endpoints, is the project's first DTO).
 - The ZAP active scan is CPU/memory-intensive. On low-resource machines it can consume
   available memory quickly and slow the whole system down. Run it on a machine with a
   reasonable amount of free RAM (8GB+ recommended for Docker Desktop + ZAP + Juice Shop + the
