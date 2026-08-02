@@ -196,15 +196,26 @@ won't produce a `backend` image if a test fails.
 
 ## Project status
 
-The full stack — `zap`, `juice-shop`, `postgres`, `backend`, and `grafana` — has been run
-end-to-end via `docker compose up -d --build` on a dev machine: all five containers reach a
-healthy/running state, the backend connects to the dockerized Postgres and applies/validates
-the `scan_findings` schema on startup, the Grafana datasource connects to Postgres over the
-shared `devsecops-net` network without any host-networking workarounds, and a scan run through
-`/api/scans` produces rows visible in both `/api/findings` and the Grafana dashboard panels.
+**Complete.** The full stack — `zap`, `juice-shop`, `postgres`, `backend`, and `grafana` — runs
+end-to-end from a single `docker compose up -d --build` on a clean clone: all five containers
+reach a healthy/running state, the backend connects to the dockerized Postgres and
+applies/validates the `scan_findings` schema on startup, the Grafana datasource connects to
+Postgres over the shared `devsecops-net` network with no host-networking workarounds, and a scan
+run through `/api/scans` produces rows visible in both `/api/findings` and the Grafana dashboard
+panels — verified by querying the panels' own SQL through Grafana's API, not just that the
+dashboard loads.
+
+Nothing depends on the machine it's built on: no native Postgres/Java/Maven install and no
+machine-specific credentials are required. `git clone` → `cp .env.example .env` →
+`docker compose up --build` is the entire setup, on any machine with Docker.
+
+The backend has a unit test suite (16 tests, see [Tests](#tests)) that runs as part of the
+`Dockerfile` build, so a broken change can't produce a working `backend` image.
 
 Full-coverage active scans remain memory-intensive (see Known limitations) — for routine local
-verification, scoping with `riskLevels` is recommended over unscoped full scans.
+verification, scoping with `riskLevels` is recommended over unscoped full scans. Beyond that,
+what remains is the documented, deliberate scope cuts below (async scans, DTOs) — not bugs,
+just intentionally out of scope for this learning project.
 
 ## Project context
 
