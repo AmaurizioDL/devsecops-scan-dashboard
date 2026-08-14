@@ -179,6 +179,11 @@ the ways to cut that short.
 - **Raw JSON**: `curl http://localhost:8081/api/findings`, or the "View raw findings" link on
   the trigger page.
 
+Panels auto-refresh every 10s and query Postgres directly with no caching layer — a finding
+saved mid-scan shows up on the next refresh tick. If the Grafana tab was in the background
+(browsers throttle timers on inactive tabs) or you're checking right after a scan finishes,
+give it a few seconds or reload the page rather than assuming the dashboard is stale.
+
 ### Alternative: run the backend outside Docker
 
 If you're actively developing the backend and want faster iteration than rebuilding the
