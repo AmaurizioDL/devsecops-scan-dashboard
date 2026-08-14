@@ -3,7 +3,7 @@
   "title": "DevSecOps Scan Findings",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": { "from": "now-30d", "to": "now" },
   "templating": {
@@ -131,7 +131,35 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT detected_at AS \"Detected At\", target_url AS \"Target\", scan_type AS \"Type\", risk_level AS \"Risk\", alert_name AS \"Alert\", cwe_id AS \"CWE\", affected_url AS \"Affected URL\" FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) ORDER BY detected_at DESC LIMIT 500"
+          "rawSql": "SELECT detected_at AS \"Detected At\", target_url AS \"Target\", scan_type AS \"Type\", risk_level AS \"Risk\", alert_name AS \"Alert\", cwe_id AS \"CWE\", owasp_category AS \"OWASP Category\", affected_url AS \"Affected URL\" FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) ORDER BY detected_at DESC LIMIT 500"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "text",
+      "title": "Vulnerability Report",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 3 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Full OWASP-grounded vulnerability report (priority, business impact, remediation per finding):** [Download PDF](http://localhost:8081/api/reports/pdf)"
+      }
+    },
+    {
+      "id": 7,
+      "type": "piechart",
+      "title": "Findings by OWASP Top 10 Category",
+      "gridPos": { "x": 0, "y": 25, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "devsecops-postgres" },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+        "pieType": "donut"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(owasp_category, 'N/A') AS metric, COUNT(*) AS value FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) GROUP BY owasp_category ORDER BY value DESC"
         }
       ]
     }

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS scan_findings (
     alert_name TEXT NOT NULL,
     risk_level VARCHAR(20) NOT NULL,
     cwe_id INTEGER,
+    owasp_category VARCHAR(40),
     affected_url TEXT,
     description TEXT,
     solution TEXT,

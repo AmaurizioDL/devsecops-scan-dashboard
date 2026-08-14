@@ -32,6 +32,9 @@ public class ScanFinding {
     @Column(name = "cwe_id")
     private Integer cweId;
 
+    @Column(name = "owasp_category", length = 40)
+    private String owaspCategory;
+
     @Column(name = "affected_url")
     private String affectedUrl;
 
@@ -48,12 +51,13 @@ public class ScanFinding {
     }
 
     public ScanFinding(String targetUrl, String scanType, String alertName, String riskLevel,
-                        Integer cweId, String affectedUrl, String description, String solution) {
+                        Integer cweId, String owaspCategory, String affectedUrl, String description, String solution) {
         this.targetUrl = targetUrl;
         this.scanType = scanType;
         this.alertName = alertName;
         this.riskLevel = riskLevel;
         this.cweId = cweId;
+        this.owaspCategory = owaspCategory;
         this.affectedUrl = affectedUrl;
         this.description = description;
         this.solution = solution;
@@ -101,6 +105,14 @@ public class ScanFinding {
 
     public void setCweId(Integer cweId) {
         this.cweId = cweId;
+    }
+
+    public String getOwaspCategory() {
+        return owaspCategory;
+    }
+
+    public void setOwaspCategory(String owaspCategory) {
+        this.owaspCategory = owaspCategory;
     }
 
     public String getAffectedUrl() {

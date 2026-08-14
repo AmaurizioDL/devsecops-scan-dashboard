@@ -152,12 +152,14 @@ public class ScanService {
     }
 
     private ScanFinding toScanFinding(String targetUrl, ZapClient.ZapAlert alert, String scanType, LocalDateTime detectedAt) {
+        Integer cweId = parseCweId(alert.cweid());
         ScanFinding finding = new ScanFinding(
                 targetUrl,
                 scanType,
                 alert.alert(),
                 alert.risk(),
-                parseCweId(alert.cweid()),
+                cweId,
+                OwaspTop10Mapper.mapCwe(cweId).code(),
                 alert.url(),
                 alert.description(),
                 alert.solution()

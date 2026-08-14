@@ -7,4 +7,6 @@ import java.util.List;
 public interface ScanFindingRepository extends JpaRepository<ScanFinding, Integer> {
 
     List<ScanFinding> findAllByOrderByDetectedAtDesc();
+
+    List<ScanFinding> findAllByTargetUrlOrderByDetectedAtDesc(String targetUrl);
 }
