@@ -14,6 +14,14 @@
   // a scan or check the dashboard; see README "Cloud Development" section.
   "runServices": ["app", "postgres"],
 
+  // Lets `gh codespace ssh`/`gh codespace cp` work against the "app" service
+  // (the base maven image has no SSH server by default).
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
+
   "forwardPorts": [8081, 3001, 3000, 8080, 5432],
   "portsAttributes": {
     "8081": { "label": "Backend API", "onAutoForward": "notify" },
