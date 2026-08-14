@@ -1,0 +1,33 @@
+{
+  "name": "DevSecOps Scan Dashboard",
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "docker-compose.yml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+
+  // Only "app" (Maven + shell) and "postgres" start automatically — keeps the
+  // Codespace light by default. Bring up zap/juice-shop/grafana on demand with
+  // `docker compose up -d zap juice-shop grafana` when you actually need to run
+  // a scan or check the dashboard; see README "Cloud Development" section.
+  "runServices": ["app", "postgres"],
+
+  "forwardPorts": [8081, 3001, 3000, 8080, 5432],
+  "portsAttributes": {
+    "8081": { "label": "Backend API", "onAutoForward": "notify" },
+    "3001": { "label": "Grafana", "onAutoForward": "openPreview" },
+    "3000": { "label": "Juice Shop (scan target)", "onAutoForward": "silent" },
+    "8080": { "label": "ZAP API", "onAutoForward": "silent" },
+    "5432": { "label": "Postgres", "onAutoForward": "silent" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["vscjava.vscode-java-pack"]
+    }
+  },
+
+  "postCreateCommand": "mvn -B -q dependency:go-offline"
+}

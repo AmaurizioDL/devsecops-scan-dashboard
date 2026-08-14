@@ -15,6 +15,32 @@ one thing Grafana can't do: triggering a scan.
 Everything runs in Docker — clone the repo, `docker compose up`, done. No native database
 install, no host-level Java/Maven required.
 
+## Cloud Development (GitHub Codespaces)
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AmaurizioDL/devsecops-scan-dashboard)
+
+The full stack — ZAP especially — is CPU/memory-heavy (see [Known limitations](#known-limitations--deliberate-scope-cuts)).
+Running it alongside an IDE on a modest laptop can saturate the machine. Codespaces runs the
+same `docker-compose.yml` on a cloud VM instead of your machine, and it's also how anyone
+without Docker installed locally can try this project — click the badge, no local setup at all.
+
+The `.devcontainer/` config starts only `app` (a Maven + shell container with the repo mounted
+live) and `postgres` by default, so the Codespace itself stays light. Bring up the rest only
+when you need them:
+
+```bash
+# inside the Codespace terminal
+mvn spring-boot:run                                   # iterate on the backend directly
+# in another terminal, when you want to actually scan/see the dashboard:
+docker compose up -d zap juice-shop grafana
+```
+
+Codespaces forwards ports 8081 (backend), 3001 (Grafana), 3000 (Juice Shop), 8080 (ZAP), and
+5432 (Postgres) automatically — same URLs/flow as the [Setup](#setup) section below, just
+opened via the forwarded-ports tab instead of `localhost`. Free personal GitHub accounts include
+a monthly quota of Codespaces core-hours/storage; check your usage under
+**GitHub → Settings → Codespaces** if you keep one running a while.
+
 ## Architecture
 
 ```

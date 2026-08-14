@@ -1,0 +1,25 @@
+services:
+  # Dev-only service: not part of the "production" stack in ../docker-compose.yml.
+  # Gives Codespaces (or any devcontainer host) a container with Maven + a shell,
+  # source mounted live, so you can `mvn spring-boot:run` / `mvn test` without
+  # rebuilding the backend's Dockerfile image on every change.
+  app:
+    image: maven:3.9-eclipse-temurin-21
+    container_name: app
+    volumes:
+      - ..:/workspace:cached
+    working_dir: /workspace
+    command: sleep infinity
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=devsecops_dashboard
+      - DB_USERNAME=${DB_USERNAME:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-changeme}
+      - ZAP_BASE_URL=http://zap:8080
+    networks:
+      - devsecops-net
+
+networks:
+  devsecops-net:
+    name: devsecops-net
