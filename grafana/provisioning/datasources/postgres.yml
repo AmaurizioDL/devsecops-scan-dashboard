@@ -13,6 +13,7 @@ datasources:
     isDefault: true
     editable: true
     jsonData:
+      database: devsecops_dashboard
       sslmode: disable
     secureJsonData:
       # Expanded from the DB_USERNAME/DB_PASSWORD env vars set on the grafana
