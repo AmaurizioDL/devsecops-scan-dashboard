@@ -3,11 +3,19 @@
   "title": "DevSecOps Scan Findings",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "refresh": "10s",
   "time": { "from": "now-30d", "to": "now" },
   "templating": {
     "list": [
+      {
+        "name": "backend_url",
+        "type": "textbox",
+        "label": "Backend URL",
+        "description": "Base URL of the backend API. Defaults to the local docker-compose port; change this if viewing Grafana through GitHub Codespaces port forwarding (use the forwarded URL for the backend's port).",
+        "current": { "text": "http://localhost:8091", "value": "http://localhost:8091" },
+        "query": "http://localhost:8091"
+      },
       {
         "name": "target_url",
         "type": "query",
@@ -142,7 +150,7 @@
       "gridPos": { "x": 0, "y": 22, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "**Full OWASP-grounded vulnerability report (priority, business impact, remediation per finding):** [Download PDF](http://localhost:8081/api/reports/pdf)"
+        "content": "**Full OWASP-grounded vulnerability report (priority, business impact, remediation per finding):** [Download PDF](${backend_url}/api/reports/pdf)\n\nUsing GitHub Codespaces? Set the **Backend URL** variable above to your forwarded backend URL first."
       }
     },
     {
