@@ -35,7 +35,7 @@ mvn spring-boot:run                                   # iterate on the backend d
 docker compose up -d zap juice-shop grafana
 ```
 
-Codespaces forwards ports 8081 (backend), 3001 (Grafana), 3000 (Juice Shop), 8080 (ZAP), and
+Codespaces forwards ports 8091 (backend), 3011 (Grafana), 3000 (Juice Shop), 8090 (ZAP), and
 5432 (Postgres) automatically — same URLs/flow as the [Setup](#setup) section below, just
 opened via the forwarded-ports tab instead of `localhost`. Free personal GitHub accounts include
 a monthly quota of Codespaces core-hours/storage; check your usage under
@@ -50,7 +50,7 @@ a monthly quota of Codespaces core-hours/storage; check your usage under
  │  backend      │ ─────────────────────▶│  zap         │
  │  (Spring Boot,│                        │  Docker      │
  │  container,   │                        │  container   │
- │  :8081)       │                        └──────┬───────┘
+ │  :8091)       │                        └──────┬───────┘
  │  + static     │                               │ scans over
  │  trigger page │                               │ devsecops-net
  │  (/)          │                        ┌───────▼──────┐
@@ -64,7 +64,7 @@ a monthly quota of Codespaces core-hours/storage; check your usage under
  └──────────────┘                     │ grafana       │
                                        │ Docker        │
                                        │ container     │
-                                       │ (:3001)       │
+                                       │ (:3011)       │
                                        └───────────────┘
 ```
 
@@ -125,19 +125,19 @@ the backend waits for Postgres to report healthy before starting.
 Sanity checks:
 
 ```bash
-curl http://localhost:8080          # ZAP daemon responding
+curl http://localhost:8090          # ZAP daemon responding
 curl -I http://localhost:3000       # Juice Shop responding
-curl -I http://localhost:8081       # Backend responding
-curl -I http://localhost:3001       # Grafana responding
+curl -I http://localhost:8091       # Backend responding
+curl -I http://localhost:3011       # Grafana responding
 ```
 
-Open Grafana at **http://localhost:3001** (login `admin` / the `GRAFANA_ADMIN_PASSWORD` you
+Open Grafana at **http://localhost:3011** (login `admin` / the `GRAFANA_ADMIN_PASSWORD` you
 set, default `admin`). The "DevSecOps Scan Findings" dashboard and its Postgres datasource are
 already provisioned — no manual setup needed. It'll be empty until you run a scan.
 
 ### 4. Run a scan
 
-Open **http://localhost:8081** — the trigger page served by the backend. Enter a target URL
+Open **http://localhost:8091** — the trigger page served by the backend. Enter a target URL
 (e.g. `http://juice-shop:3000`), optionally check specific risk levels, and click "Run scan".
 The scan runs in the background: the page polls scan status every ~1.5s and shows a progress
 bar (per phase — spider, then active scan), an ETA, and a "Detener scan" button to cancel it
@@ -146,13 +146,13 @@ mid-run.
 Or via curl. `POST /api/scans` returns immediately with a `scanId`:
 
 ```bash
-curl -X POST "http://localhost:8081/api/scans?targetUrl=http://juice-shop:3000"
+curl -X POST "http://localhost:8091/api/scans?targetUrl=http://juice-shop:3000"
 # {"scanId":"...", "phase":"SPIDER", "percent":0, ...}
 
-curl "http://localhost:8081/api/scans/<scanId>"
+curl "http://localhost:8091/api/scans/<scanId>"
 # poll this — phase moves SPIDER -> ACTIVE_SCAN -> DONE, percent/etaSeconds update each call
 
-curl -X POST "http://localhost:8081/api/scans/<scanId>/stop"
+curl -X POST "http://localhost:8091/api/scans/<scanId>/stop"
 # cancels the running scan; whatever findings existed at that point are still saved
 ```
 
@@ -163,7 +163,7 @@ Optional: restrict the active scan to specific risk categories (see
 `ZapScannerRiskCatalog`) to shorten scan time and reduce memory pressure:
 
 ```bash
-curl -X POST "http://localhost:8081/api/scans?targetUrl=http://juice-shop:3000&riskLevels=HIGH,MEDIUM"
+curl -X POST "http://localhost:8091/api/scans?targetUrl=http://juice-shop:3000&riskLevels=HIGH,MEDIUM"
 ```
 
 Only one scan runs at a time (matches how ZAP itself works) — a second `POST /api/scans` while
@@ -173,10 +173,10 @@ the ways to cut that short.
 
 ### 5. View the results
 
-- **Grafana** (http://localhost:3001) — the "DevSecOps Scan Findings" dashboard: severity
+- **Grafana** (http://localhost:3011) — the "DevSecOps Scan Findings" dashboard: severity
   breakdown donut, findings-over-time trend, stat cards, and a filterable table, with
   dashboard variables to filter by target/risk level/scan type.
-- **Raw JSON**: `curl http://localhost:8081/api/findings`, or the "View raw findings" link on
+- **Raw JSON**: `curl http://localhost:8091/api/findings`, or the "View raw findings" link on
   the trigger page.
 
 Panels auto-refresh every 10s and query Postgres directly with no caching layer — a finding
