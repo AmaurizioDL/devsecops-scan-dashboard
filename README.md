@@ -178,6 +178,20 @@ the ways to cut that short.
   dashboard variables to filter by target/risk level/scan type.
 - **Raw JSON**: `curl http://localhost:8091/api/findings`, or the "View raw findings" link on
   the trigger page.
+- **PDF reports** (links on the trigger page and in the Grafana dashboard), structured after the
+  executive/technical split used by the OWASP WSTG reporting guide, PTES and NIST SP 800-115:
+  - **Executive summary** (`/api/reports/executive`): overall risk posture, scope and
+    limitations, counts by severity and OWASP Top 10 category, top 5 risks in business terms,
+    strategic recommendations, and a remediation roadmap by timeframe (P1 0-7 days, P2 30 days,
+    P3 90 days).
+  - **Technical report** (`/api/reports/technical`): a findings summary table plus one entry per
+    *unique* vulnerability (VULN-001, ...) with risk, ZAP confidence, CWE, OWASP category,
+    affected URLs, example evidence, remediation and references, and appendices on methodology
+    and rating scales.
+
+  Raw ZAP alerts (one per rule per URL, repeated across scans) are consolidated by ZAP rule +
+  risk level, so a missing header on 40 pages is one vulnerability with 40 affected URLs, not 40
+  findings. Both accept an optional `?targetUrl=` filter.
 
 Panels auto-refresh every 10s and query Postgres directly with no caching layer — a finding
 saved mid-scan shows up on the next refresh tick. If the Grafana tab was in the background
@@ -207,6 +221,8 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 | GET    | `/api/scans/{scanId}`      | Current status of a scan: `phase` (`SPIDER`/`ACTIVE_SCAN`/`DONE`/`STOPPED`/`FAILED`), `percent`, `etaSeconds` (nullable), `elapsedSeconds`, and `findings` (once `DONE`/`STOPPED`). `404` once a newer scan has replaced it — only the current/last scan is tracked. |
 | POST   | `/api/scans/{scanId}/stop` | Requests cancellation of a running scan. Findings already collected at that point are still saved (phase becomes `STOPPED`). `404` if unknown. |
 | GET    | `/api/findings`            | Returns all stored findings, most recent first.                        |
+| GET    | `/api/reports/executive`   | Executive summary PDF (optional `targetUrl` filter).                   |
+| GET    | `/api/reports/technical`   | Technical vulnerability report PDF (optional `targetUrl` filter). `/api/reports/pdf` is kept as an alias. |
 | GET    | `/`                        | Static HTML page to trigger a scan and link out to Grafana.            |
 
 ## Tests
@@ -216,8 +232,10 @@ that matters most for correctness: the ZAP alert → `ScanFinding` mapping (incl
 cases: null/negative/non-numeric values), passive-vs-active dedup by alert id, the scan-timeout
 guard, `targetUrl`/`riskLevels` request validation in `ScanController`, the risk-level →
 ZAP-scanner-id catalog, the sliding-window ETA calculation (`ScanProgressEstimator`), the
-single-current-scan conflict rule (`ScanRunRegistry`), and stopping a scan mid-spider or
-mid-active-scan (partial findings still saved, ZAP's stop action called).
+single-current-scan conflict rule (`ScanRunRegistry`), stopping a scan mid-spider or
+mid-active-scan (partial findings still saved, ZAP's stop action called), the report
+consolidation/ordering rules (`VulnerabilityConsolidator`), and that both PDF reports render
+valid PDFs from realistic ZAP text.
 
 ```bash
 mvn test
@@ -248,6 +266,15 @@ won't produce a `backend` image if a test fails.
   number of active scanners running.
 - `pgdata` and `grafana-data` are named Docker volumes — `docker compose down` keeps them,
   `docker compose down -v` deletes findings/dashboards state along with the containers.
+- Upgrading an existing database: `db/schema.sql` only runs automatically on a fresh `pgdata`
+  volume. If your volume predates the report columns (`confidence`, `plugin_id`, `evidence`,
+  `reference`), the backend will refuse to start (`ddl-auto=validate`). Either re-run the schema
+  file, which adds them idempotently without deleting findings
+  (`docker exec -i postgres psql -U <DB_USERNAME> -d devsecops_dashboard < db/schema.sql`), or
+  reset with `docker compose down -v`. Findings stored before the upgrade show confidence
+  "Unknown" and are grouped by alert name instead of ZAP rule id.
+- Report risk and confidence are ZAP's own ratings; no CVSS score or OWASP Risk Rating is
+  computed.
 
 ## Project status
 

@@ -157,8 +157,13 @@ public class ZapClient {
         }
     }
 
+    /**
+     * pluginId, confidence, reference y evidence alimentan los reportes (consolidacion por
+     * regla de ZAP, nivel de confianza, referencias externas y evidencia por instancia).
+     */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ZapAlert(String id, String alert, String risk, String cweid, String url, String description, String solution) {
+    public record ZapAlert(String id, String pluginId, String alert, String risk, String confidence, String cweid,
+                           String url, String evidence, String description, String solution, String reference) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

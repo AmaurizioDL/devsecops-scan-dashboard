@@ -164,6 +164,10 @@ public class ScanService {
                 alert.description(),
                 alert.solution()
         );
+        finding.setConfidence(alert.confidence());
+        finding.setPluginId(alert.pluginId());
+        finding.setEvidence(alert.evidence());
+        finding.setReference(alert.reference());
         finding.setDetectedAt(detectedAt);
         return finding;
     }

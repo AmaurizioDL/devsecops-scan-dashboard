@@ -3,7 +3,7 @@
   "title": "DevSecOps Scan Findings",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "refresh": "10s",
   "time": { "from": "now-30d", "to": "now" },
   "templating": {
@@ -139,7 +139,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT detected_at AS \"Detected At\", target_url AS \"Target\", scan_type AS \"Type\", risk_level AS \"Risk\", alert_name AS \"Alert\", cwe_id AS \"CWE\", owasp_category AS \"OWASP Category\", affected_url AS \"Affected URL\" FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) ORDER BY detected_at DESC LIMIT 500"
+          "rawSql": "SELECT detected_at AS \"Detected At\", target_url AS \"Target\", scan_type AS \"Type\", risk_level AS \"Risk\", confidence AS \"Confidence\", alert_name AS \"Alert\", cwe_id AS \"CWE\", owasp_category AS \"OWASP Category\", affected_url AS \"Affected URL\" FROM scan_findings WHERE risk_level IN ($risk_level) AND scan_type IN ($scan_type) AND target_url IN ($target_url) ORDER BY detected_at DESC LIMIT 500"
         }
       ]
     },
@@ -150,7 +150,7 @@
       "gridPos": { "x": 0, "y": 22, "w": 24, "h": 3 },
       "options": {
         "mode": "markdown",
-        "content": "**Full OWASP-grounded vulnerability report (priority, business impact, remediation per finding):** [Download PDF](${backend_url}/api/reports/pdf)\n\nUsing GitHub Codespaces? Set the **Backend URL** variable above to your forwarded backend URL first."
+        "content": "**Vulnerability reports (PDF):** <a href=\"${backend_url}/api/reports/executive\" target=\"_blank\" rel=\"noopener\">Executive summary</a> (overall risk posture, top risks, remediation roadmap) &middot; <a href=\"${backend_url}/api/reports/technical\" target=\"_blank\" rel=\"noopener\">Technical report</a> (each unique vulnerability with affected URLs, evidence, remediation, references)\n\nUsing GitHub Codespaces? Set the **Backend URL** variable above to your forwarded backend URL first."
       }
     },
     {

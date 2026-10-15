@@ -47,9 +47,9 @@ class ScanServiceTest {
         when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
         when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
 
-        ZapClient.ZapAlert seenDuringSpider = new ZapClient.ZapAlert(
+        ZapClient.ZapAlert seenDuringSpider = alert(
                 "1", "Directory Browsing", "Low", "0", targetUrl + "/assets", "d1", "s1");
-        ZapClient.ZapAlert onlySeenAfterActiveScan = new ZapClient.ZapAlert(
+        ZapClient.ZapAlert onlySeenAfterActiveScan = alert(
                 "2", "SQL Injection", "High", "89", targetUrl + "/login", "d2", "s2");
 
         when(zapClient.getAlerts(targetUrl))
@@ -78,10 +78,10 @@ class ScanServiceTest {
         when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
 
         List<ZapClient.ZapAlert> alerts = List.of(
-                new ZapClient.ZapAlert("1", "Null CWE", "Low", null, targetUrl, "d", "s"),
-                new ZapClient.ZapAlert("2", "Negative CWE", "Low", "-1", targetUrl, "d", "s"),
-                new ZapClient.ZapAlert("3", "Non-numeric CWE", "Low", "n/a", targetUrl, "d", "s"),
-                new ZapClient.ZapAlert("4", "Valid CWE", "High", " 79 ", targetUrl, "d", "s")
+                alert("1", "Null CWE", "Low", null, targetUrl, "d", "s"),
+                alert("2", "Negative CWE", "Low", "-1", targetUrl, "d", "s"),
+                alert("3", "Non-numeric CWE", "Low", "n/a", targetUrl, "d", "s"),
+                alert("4", "Valid CWE", "High", " 79 ", targetUrl, "d", "s")
         );
         when(zapClient.getAlerts(targetUrl)).thenReturn(alerts, alerts);
 
@@ -130,7 +130,7 @@ class ScanServiceTest {
         when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
         when(zapClient.getSpiderStatus("spider-1")).thenReturn(50); // never reaches 100
         when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(
-                new ZapClient.ZapAlert("1", "Directory Browsing", "Low", "0", targetUrl, "d", "s")));
+                alert("1", "Directory Browsing", "Low", "0", targetUrl, "d", "s")));
 
         ScanRun run = scanRunRegistry.begin(targetUrl, Set.of());
         run.requestStop();
@@ -151,8 +151,8 @@ class ScanServiceTest {
         when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
         when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
 
-        ZapClient.ZapAlert passiveAlert = new ZapClient.ZapAlert("1", "Directory Browsing", "Low", "0", targetUrl, "d", "s");
-        ZapClient.ZapAlert activeAlert = new ZapClient.ZapAlert("2", "SQL Injection", "High", "89", targetUrl, "d2", "s2");
+        ZapClient.ZapAlert passiveAlert = alert("1", "Directory Browsing", "Low", "0", targetUrl, "d", "s");
+        ZapClient.ZapAlert activeAlert = alert("2", "SQL Injection", "High", "89", targetUrl, "d2", "s2");
         when(zapClient.getAlerts(targetUrl))
                 .thenReturn(List.of(passiveAlert))
                 .thenReturn(List.of(passiveAlert, activeAlert));
@@ -171,6 +171,32 @@ class ScanServiceTest {
         assertThat(run.snapshot().findings()).hasSize(2);
         assertThat(run.snapshot().findings().get(1).getScanType()).isEqualTo("ACTIVE");
         verify(zapClient).stopActiveScan("active-1");
+    }
+
+    @Test
+    void startScan_mapsReportFieldsFromZapAlert() {
+        String targetUrl = "http://target";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
+        when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
+        ZapClient.ZapAlert zapAlert = new ZapClient.ZapAlert("1", "40018", "SQL Injection", "High", "Medium", "89",
+                targetUrl + "/login", "' OR 1=1--", "d", "s", "https://owasp.org/sqli");
+        when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(zapAlert), List.of(zapAlert));
+
+        ScanFinding finding = scanService.startScan(targetUrl, Set.of()).snapshot().findings().get(0);
+
+        assertThat(finding.getPluginId()).isEqualTo("40018");
+        assertThat(finding.getConfidence()).isEqualTo("Medium");
+        assertThat(finding.getEvidence()).isEqualTo("' OR 1=1--");
+        assertThat(finding.getReference()).isEqualTo("https://owasp.org/sqli");
+        assertThat(finding.getOwaspCategory()).isEqualTo("A03:2021");
+    }
+
+    /** Alerta con solo los campos que usan los tests de flujo; los campos de reporte quedan null. */
+    private static ZapClient.ZapAlert alert(String id, String name, String risk, String cweid,
+                                            String url, String description, String solution) {
+        return new ZapClient.ZapAlert(id, null, name, risk, null, cweid, url, null, description, solution, null);
     }
 
     private static ScanFinding findByAlertName(List<ScanFinding> findings, String alertName) {

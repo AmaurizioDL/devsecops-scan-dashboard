@@ -44,6 +44,18 @@ public class ScanFinding {
     @Column(name = "solution")
     private String solution;
 
+    @Column(name = "confidence", length = 20)
+    private String confidence;
+
+    @Column(name = "plugin_id", length = 20)
+    private String pluginId;
+
+    @Column(name = "evidence")
+    private String evidence;
+
+    @Column(name = "reference")
+    private String reference;
+
     @Column(name = "detected_at")
     private LocalDateTime detectedAt;
 
@@ -137,6 +149,38 @@ public class ScanFinding {
 
     public void setSolution(String solution) {
         this.solution = solution;
+    }
+
+    public String getConfidence() {
+        return confidence;
+    }
+
+    public void setConfidence(String confidence) {
+        this.confidence = confidence;
+    }
+
+    public String getPluginId() {
+        return pluginId;
+    }
+
+    public void setPluginId(String pluginId) {
+        this.pluginId = pluginId;
+    }
+
+    public String getEvidence() {
+        return evidence;
+    }
+
+    public void setEvidence(String evidence) {
+        this.evidence = evidence;
+    }
+
+    public String getReference() {
+        return reference;
+    }
+
+    public void setReference(String reference) {
+        this.reference = reference;
     }
 
     public LocalDateTime getDetectedAt() {
