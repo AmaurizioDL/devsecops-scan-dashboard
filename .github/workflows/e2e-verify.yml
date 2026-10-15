@@ -21,11 +21,15 @@ jobs:
     timeout-minutes: 60
     env:
       BACKEND: http://localhost:8091
-      ZAP: http://localhost:8090
+      # ZAP only serves its API to requests addressed to itself; from the host, a plain
+      # http://localhost:8090 request gets proxied onward (502). Using ZAP as the proxy
+      # for its special http://zap/ domain reaches the API instead.
+      ZAP_PROXY: http://localhost:8090
+      ZAP: http://zap
       GRAFANA: http://localhost:3011
       TARGET: http://juice-shop:3000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Start the stack
         run: |
@@ -37,13 +41,13 @@ jobs:
         run: |
           wait_for() {
             for i in $(seq 1 90); do
-              if curl -fsS -o /dev/null "$1"; then echo "$1 is up"; return 0; fi
+              if curl -fsS -o /dev/null ${2:+-x "$2"} "$1"; then echo "$1 is up"; return 0; fi
               sleep 5
             done
             echo "::error::$1 never came up"; return 1
           }
           wait_for "$BACKEND/api/findings"
-          wait_for "$ZAP/JSON/core/view/version/"
+          wait_for "$ZAP/JSON/core/view/version/" "$ZAP_PROXY"
           wait_for "$GRAFANA/api/health"
           wait_for "http://localhost:3000"
 
@@ -87,7 +91,7 @@ jobs:
       - name: Save a raw ZAP alert sample (field names)
         run: |
           mkdir -p out
-          curl -fsS "$ZAP/JSON/core/view/alerts/?baseurl=$TARGET&start=0&count=3" | jq . > out/zap-alert-sample.json
+          curl -fsS -x "$ZAP_PROXY" "$ZAP/JSON/core/view/alerts/?baseurl=$TARGET&start=0&count=3" | jq . > out/zap-alert-sample.json
           jq '.alerts[0] | keys' out/zap-alert-sample.json
 
       - name: Download and check both PDF reports
@@ -120,7 +124,7 @@ jobs:
           docker compose ps > out/compose-ps.txt
           for s in backend grafana postgres; do docker logs "$s" > "out/$s.log" 2>&1 || true; done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: e2e-results
