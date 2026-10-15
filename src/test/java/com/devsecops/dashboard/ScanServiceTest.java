@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -181,7 +182,7 @@ class ScanServiceTest {
         when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
         when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
         ZapClient.ZapAlert zapAlert = new ZapClient.ZapAlert("1", "40018", "SQL Injection", "High", "Medium", "89",
-                targetUrl + "/login", "' OR 1=1--", "d", "s", "https://owasp.org/sqli");
+                targetUrl + "/login", "' OR 1=1--", "d", "s", "https://owasp.org/sqli", null);
         when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(zapAlert), List.of(zapAlert));
 
         ScanFinding finding = scanService.startScan(targetUrl, Set.of()).snapshot().findings().get(0);
@@ -193,10 +194,29 @@ class ScanServiceTest {
         assertThat(finding.getOwaspCategory()).isEqualTo("A03:2021");
     }
 
+    @Test
+    void startScan_prefersZapOwaspTagOverCweMapping_andTreatsCweZeroAsNoCwe() {
+        String targetUrl = "http://target";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
+        when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
+        // Payload real de ZAP (regla 10104): sin CWE ("0") pero con tag OWASP 2021
+        ZapClient.ZapAlert zapAlert = new ZapClient.ZapAlert("1", "10104", "User Agent Fuzzer", "Informational",
+                "Medium", "0", targetUrl + "/", null, "d", "s", null,
+                Map.of("OWASP_2021_A06", "https://owasp.org/Top10/2021/A06/", "OWASP_2017_A09", "x"));
+        when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(zapAlert), List.of(zapAlert));
+
+        ScanFinding finding = scanService.startScan(targetUrl, Set.of()).snapshot().findings().get(0);
+
+        assertThat(finding.getCweId()).isNull();
+        assertThat(finding.getOwaspCategory()).isEqualTo("A06:2021");
+    }
+
     /** Alerta con solo los campos que usan los tests de flujo; los campos de reporte quedan null. */
     private static ZapClient.ZapAlert alert(String id, String name, String risk, String cweid,
                                             String url, String description, String solution) {
-        return new ZapClient.ZapAlert(id, null, name, risk, null, cweid, url, null, description, solution, null);
+        return new ZapClient.ZapAlert(id, null, name, risk, null, cweid, url, null, description, solution, null, null);
     }
 
     private static ScanFinding findByAlertName(List<ScanFinding> findings, String alertName) {

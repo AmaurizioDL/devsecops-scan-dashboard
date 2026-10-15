@@ -1,6 +1,9 @@
 package com.devsecops.dashboard;
 
 import java.util.Map;
+import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static com.devsecops.dashboard.OwaspTop10Category.A01_BROKEN_ACCESS_CONTROL;
 import static com.devsecops.dashboard.OwaspTop10Category.A02_CRYPTOGRAPHIC_FAILURES;
@@ -21,12 +24,15 @@ import static com.devsecops.dashboard.OwaspTop10Category.UNMAPPED;
  */
 public final class OwaspTop10Mapper {
 
+    private static final Pattern OWASP_2021_TAG = Pattern.compile("OWASP_2021_A(\\d{2})");
+
     private static final Map<Integer, OwaspTop10Category> CATEGORY_BY_CWE = Map.ofEntries(
             // A01: Broken Access Control
             Map.entry(22, A01_BROKEN_ACCESS_CONTROL),   // Path Traversal
             Map.entry(23, A01_BROKEN_ACCESS_CONTROL),   // Relative Path Traversal
             Map.entry(200, A01_BROKEN_ACCESS_CONTROL),  // Exposure of Sensitive Information
             Map.entry(284, A01_BROKEN_ACCESS_CONTROL),  // Improper Access Control
+            Map.entry(264, A01_BROKEN_ACCESS_CONTROL),  // Permissions, Privileges, and Access Controls (CORS en ZAP)
             Map.entry(285, A01_BROKEN_ACCESS_CONTROL),  // Improper Authorization
             Map.entry(352, A01_BROKEN_ACCESS_CONTROL),  // CSRF
             Map.entry(538, A01_BROKEN_ACCESS_CONTROL),  // File and Directory Information Exposure
@@ -83,6 +89,30 @@ public final class OwaspTop10Mapper {
     );
 
     private OwaspTop10Mapper() {
+    }
+
+    /**
+     * Categoria de una alerta de ZAP: primero el tag OWASP_2021_Axx que la propia regla
+     * declara (lo mantiene el equipo de ZAP y cubre CWEs genericos como 264), y si la
+     * alerta no lo trae, el mapeo por CWE.
+     */
+    public static OwaspTop10Category map(Map<String, String> zapTags, Integer cweId) {
+        OwaspTop10Category fromTags = mapTags(zapTags);
+        return fromTags != UNMAPPED ? fromTags : mapCwe(cweId);
+    }
+
+    public static OwaspTop10Category mapTags(Map<String, String> zapTags) {
+        if (zapTags == null) {
+            return UNMAPPED;
+        }
+        return zapTags.keySet().stream()
+                .map(OWASP_2021_TAG::matcher)
+                .filter(Matcher::matches)
+                .map(m -> OwaspTop10Category.fromCode("A" + m.group(1) + ":2021"))
+                .filter(Objects::nonNull)
+                .sorted()
+                .findFirst()
+                .orElse(UNMAPPED);
     }
 
     public static OwaspTop10Category mapCwe(Integer cweId) {

@@ -8,6 +8,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriBuilder;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -160,10 +161,13 @@ public class ZapClient {
     /**
      * pluginId, confidence, reference y evidence alimentan los reportes (consolidacion por
      * regla de ZAP, nivel de confianza, referencias externas y evidencia por instancia).
+     * tags trae la clasificacion que la propia regla de ZAP declara (p.ej. "OWASP_2021_A01"),
+     * que se usa como fuente principal de la categoria OWASP (ver OwaspTop10Mapper).
      */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ZapAlert(String id, String pluginId, String alert, String risk, String confidence, String cweid,
-                           String url, String evidence, String description, String solution, String reference) {
+                           String url, String evidence, String description, String solution, String reference,
+                           Map<String, String> tags) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

@@ -275,6 +275,10 @@ won't produce a `backend` image if a test fails.
   "Unknown" and are grouped by alert name instead of ZAP rule id.
 - Report risk and confidence are ZAP's own ratings; no CVSS score or OWASP Risk Rating is
   computed.
+- The OWASP Top 10:2021 category comes from the `OWASP_2021_Axx` tag that each ZAP rule declares;
+  the project's CWE → category table is only a fallback for alerts without that tag. Findings
+  stored before this change keep the category computed at scan time (CWE only) until the
+  target is scanned again.
 
 ## Project status
 

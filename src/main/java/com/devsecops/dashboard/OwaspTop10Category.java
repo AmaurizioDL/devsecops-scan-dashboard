@@ -72,7 +72,7 @@ public enum OwaspTop10Category {
     UNMAPPED(
             "N/A",
             "No associated OWASP Top 10 category",
-            "This finding has no CWE recognized by the project's mapping catalog, so it could not be automatically associated with an OWASP Top 10:2021 category. Review its impact manually.",
+            "The scanner did not classify this finding under the OWASP Top 10:2021 and its CWE is not in the project's mapping catalog, so it could not be automatically associated with a category. Review its impact manually.",
             "Review the description and solution originally reported by the scanner to define the appropriate remediation.");
 
     private final String code;
@@ -105,5 +105,18 @@ public enum OwaspTop10Category {
 
     public String label() {
         return code + " - " + title;
+    }
+
+    /** Categoria cuyo code() es el dado (p.ej. "A01:2021"), o null si ninguna coincide. */
+    public static OwaspTop10Category fromCode(String code) {
+        if (code == null) {
+            return null;
+        }
+        for (OwaspTop10Category category : values()) {
+            if (category.code.equals(code.trim())) {
+                return category;
+            }
+        }
+        return null;
     }
 }

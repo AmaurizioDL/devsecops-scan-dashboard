@@ -159,7 +159,7 @@ public class ScanService {
                 alert.alert(),
                 alert.risk(),
                 cweId,
-                OwaspTop10Mapper.mapCwe(cweId).code(),
+                OwaspTop10Mapper.map(alert.tags(), cweId).code(),
                 alert.url(),
                 alert.description(),
                 alert.solution()
@@ -177,8 +177,9 @@ public class ScanService {
             return null;
         }
         try {
+            // ZAP usa "0" (y a veces "-1") para alertas sin CWE asignado
             int value = Integer.parseInt(cweid.trim());
-            return value >= 0 ? value : null;
+            return value > 0 ? value : null;
         } catch (NumberFormatException e) {
             return null;
         }
