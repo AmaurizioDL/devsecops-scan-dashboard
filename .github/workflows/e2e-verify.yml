@@ -1,0 +1,131 @@
+# End-to-end verification of the full stack with a real ZAP scan against Juice Shop.
+# Manual only (Actions tab -> "E2E verification" -> Run workflow), so it never burns
+# minutes on every push. Produces both PDF reports + a raw ZAP alert sample as artifacts.
+name: E2E verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      risk_levels:
+        description: "riskLevels for the scan (LOW is fastest; empty = full scan)"
+        default: "LOW"
+        required: false
+      max_scan_minutes:
+        description: "Stop the scan after this many minutes (partial findings are still saved)"
+        default: "20"
+        required: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BACKEND: http://localhost:8091
+      ZAP: http://localhost:8090
+      GRAFANA: http://localhost:3011
+      TARGET: http://juice-shop:3000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the stack
+        run: |
+          cp .env.example .env
+          docker compose up -d --build
+          docker compose ps
+
+      - name: Wait for backend, ZAP and Grafana
+        run: |
+          wait_for() {
+            for i in $(seq 1 90); do
+              if curl -fsS -o /dev/null "$1"; then echo "$1 is up"; return 0; fi
+              sleep 5
+            done
+            echo "::error::$1 never came up"; return 1
+          }
+          wait_for "$BACKEND/api/findings"
+          wait_for "$ZAP/JSON/core/view/version/"
+          wait_for "$GRAFANA/api/health"
+          wait_for "http://localhost:3000"
+
+      - name: Run a real scan against Juice Shop
+        run: |
+          RISK="${{ inputs.risk_levels }}"
+          URL="$BACKEND/api/scans?targetUrl=$TARGET"
+          [ -n "$RISK" ] && URL="$URL&riskLevels=$RISK"
+          SCAN_ID=$(curl -fsS -X POST "$URL" | jq -r .scanId)
+          echo "scanId=$SCAN_ID"
+          DEADLINE=$(( $(date +%s) + ${{ inputs.max_scan_minutes }} * 60 ))
+          while true; do
+            STATUS=$(curl -fsS "$BACKEND/api/scans/$SCAN_ID")
+            PHASE=$(echo "$STATUS" | jq -r .phase)
+            echo "$(date +%T) phase=$PHASE percent=$(echo "$STATUS" | jq -r .percent) eta=$(echo "$STATUS" | jq -r .etaSeconds)"
+            case "$PHASE" in
+              DONE|STOPPED) break ;;
+              FAILED) echo "::error::scan failed: $(echo "$STATUS" | jq -r .errorMessage)"; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -gt "$DEADLINE" ]; then
+              echo "Max scan time reached, stopping scan (partial findings are kept)"
+              curl -fsS -X POST "$BACKEND/api/scans/$SCAN_ID/stop" > /dev/null
+            fi
+            sleep 10
+          done
+
+      - name: Check new report columns are populated
+        run: |
+          psql() { docker exec postgres psql -U postgres -d devsecops_dashboard -At -c "$1"; }
+          echo "rows / with confidence / plugin_id / evidence / reference:"
+          psql "SELECT COUNT(*), COUNT(confidence), COUNT(plugin_id), COUNT(NULLIF(evidence,'')), COUNT(NULLIF(reference,'')) FROM scan_findings"
+          echo "confidence values:"
+          psql "SELECT confidence, COUNT(*) FROM scan_findings GROUP BY 1 ORDER BY 2 DESC"
+          echo "unique vulnerabilities (plugin_id + risk):"
+          psql "SELECT COUNT(DISTINCT (plugin_id, risk_level)) FROM scan_findings"
+          ROWS=$(psql "SELECT COUNT(*) FROM scan_findings")
+          MISSING=$(psql "SELECT COUNT(*) FROM scan_findings WHERE confidence IS NULL OR plugin_id IS NULL")
+          [ "$ROWS" -gt 0 ] || { echo "::error::no findings saved"; exit 1; }
+          [ "$MISSING" -eq 0 ] || { echo "::error::$MISSING findings missing confidence/plugin_id"; exit 1; }
+
+      - name: Save a raw ZAP alert sample (field names)
+        run: |
+          mkdir -p out
+          curl -fsS "$ZAP/JSON/core/view/alerts/?baseurl=$TARGET&start=0&count=3" | jq . > out/zap-alert-sample.json
+          jq '.alerts[0] | keys' out/zap-alert-sample.json
+
+      - name: Download and check both PDF reports
+        run: |
+          for r in executive technical pdf; do
+            CODE=$(curl -sS -o "out/$r.pdf" -w '%{http_code}' "$BACKEND/api/reports/$r")
+            MAGIC=$(head -c 5 "out/$r.pdf")
+            echo "/api/reports/$r -> HTTP $CODE, $(stat -c %s "out/$r.pdf") bytes, magic=$MAGIC"
+            [ "$CODE" = 200 ] && [ "$MAGIC" = "%PDF-" ] || { echo "::error::/api/reports/$r is not a valid PDF"; exit 1; }
+          done
+          rm out/pdf.pdf
+
+      - name: Check Grafana datasource, dashboard and OWASP panel query
+        run: |
+          G="-fsS -u admin:admin"
+          curl $G "$GRAFANA/api/datasources/uid/devsecops-postgres/health" | tee out/grafana-ds-health.json; echo
+          curl $G "$GRAFANA/api/dashboards/uid/devsecops-scan-findings" > out/grafana-dashboard.json
+          jq -r '.dashboard.version, (.dashboard.panels[] | select(.type=="text") | .options.content)' out/grafana-dashboard.json
+          grep -q "/api/reports/executive" out/grafana-dashboard.json || { echo "::error::dashboard lacks report links"; exit 1; }
+          curl $G -H 'Content-Type: application/json' "$GRAFANA/api/ds/query" -d '{
+            "from": "now-1h", "to": "now",
+            "queries": [{"refId":"A","datasource":{"uid":"devsecops-postgres"},"format":"table",
+              "rawSql":"SELECT COALESCE(owasp_category, '\''N/A'\'') AS metric, COUNT(*) AS value FROM scan_findings GROUP BY owasp_category ORDER BY value DESC"}]
+          }' | jq -c '.results.A.frames[0].data.values'
+
+      - name: Collect container logs
+        if: always()
+        run: |
+          mkdir -p out
+          docker compose ps > out/compose-ps.txt
+          for s in backend grafana postgres; do docker logs "$s" > "out/$s.log" 2>&1 || true; done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: out/
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
