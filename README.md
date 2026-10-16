@@ -5,12 +5,12 @@ security scans against a target web application, persists the findings to Postgr
 visualizes them in a [Grafana](https://grafana.com/) dashboard. Built as a hands-on learning
 project (QA → DevSecOps transition) — it's usable against any site you are authorized to scan.
 
-The frontend is intentionally **not** a custom SPA. DevSecOps job postings consistently ask
-for Grafana/observability-dashboard fluency rather than React/Vue/Angular, and the panel
-layout here (severity breakdown, findings-over-time trend, filterable table, stat cards)
-mirrors the pattern used by real AppSec tools like DefectDojo, OWASP Dependency-Track, and
-GitLab's Security Dashboard. A minimal static page (served by Spring Boot itself) covers the
-one thing Grafana can't do: triggering a scan.
+The main UI is a **React + Vite single-page app** (`frontend/`, served by nginx on
+http://localhost:8092): start a scan and follow its progress/ETA, browse and filter findings,
+see a severity and OWASP Top 10 summary, and download the executive and technical PDF reports.
+Grafana stays alongside it for historical, observability-style dashboards (severity breakdown,
+findings-over-time trend, stat cards), the panel layout used by AppSec tools like DefectDojo,
+OWASP Dependency-Track, and GitLab's Security Dashboard.
 
 Everything runs in Docker — clone the repo, `docker compose up`, done. No native database
 install, no host-level Java/Maven required.
@@ -77,11 +77,14 @@ a monthly quota of Codespaces core-hours/storage; check your usage under
 - The **backend** (Spring Boot) is built and run from its own `Dockerfile`, and reaches
   Postgres and ZAP by container name (`postgres:5432`, `http://zap:8080`) over
   `devsecops-net`. It also serves a static HTML page at `/` for triggering scans.
+- **frontend** is the React + Vite app, built in a multi-stage `frontend/Dockerfile` and
+  served by nginx on `:8092`. nginx also proxies `/api/*` to `backend:8081`, so the browser
+  talks to a single origin and the backend needs no CORS configuration.
 - **grafana** runs in Docker, provisioned as code (`grafana/provisioning/`) — datasource and
   dashboard load automatically on `docker compose up`, no manual clicking required, and it
   reaches Postgres the same way the backend does: by container name on `devsecops-net`.
 
-All five services are defined in a single `docker-compose.yml` — one command brings up the
+All six services are defined in a single `docker-compose.yml` — one command brings up the
 whole stack on any machine with Docker installed.
 
 ## Prerequisites
@@ -115,7 +118,7 @@ cp .env.example .env
 
 ```bash
 docker compose up -d --build
-docker ps   # should show "zap", "juice-shop", "postgres", "backend", and "grafana" running
+docker ps   # should show "zap", "juice-shop", "postgres", "backend", "frontend", and "grafana" running
 ```
 
 `--build` is only needed the first time (or after changing backend source) — it builds the
@@ -129,6 +132,7 @@ curl http://localhost:8090          # ZAP daemon responding
 curl -I http://localhost:3000       # Juice Shop responding
 curl -I http://localhost:8091       # Backend responding
 curl -I http://localhost:3011       # Grafana responding
+curl -I http://localhost:8092       # Frontend responding
 ```
 
 Open Grafana at **http://localhost:3011** (login `admin` / the `GRAFANA_ADMIN_PASSWORD` you
@@ -137,11 +141,13 @@ already provisioned — no manual setup needed. It'll be empty until you run a s
 
 ### 4. Run a scan
 
-Open **http://localhost:8091** — the trigger page served by the backend. Enter a target URL
-(e.g. `http://juice-shop:3000`), optionally check specific risk levels, and click "Run scan".
-The scan runs in the background: the page polls scan status every ~1.5s and shows a progress
-bar (per phase — spider, then active scan), an ETA, and a "Detener scan" button to cancel it
-mid-run.
+Open **http://localhost:8092**, the React frontend. Enter a target URL (e.g.
+`http://juice-shop:3000`), optionally check specific risk levels, and click "Start scan".
+The scan runs in the background: the app polls scan status every 2s and shows the phase
+(spider, then active scan), a progress bar, an ETA, and a "Stop scan" button to cancel it
+mid-run. Reloading the page keeps following the same scan. When it finishes, the findings
+table and summary refresh on their own. (The older static trigger page is still served by the
+backend at http://localhost:8091.)
 
 Or via curl. `POST /api/scans` returns immediately with a `scanId`:
 
@@ -173,12 +179,16 @@ the ways to cut that short.
 
 ### 5. View the results
 
+- **Frontend** (http://localhost:8092): stat cards (total findings, unique vulnerabilities,
+  counts by severity), a bar chart of findings by OWASP Top 10 category (also viewable as a
+  table), and a findings table with search (alert, URL, `CWE-79`), severity and OWASP filters,
+  and expandable rows with description, remediation, evidence and references.
 - **Grafana** (http://localhost:3011) — the "DevSecOps Scan Findings" dashboard: severity
   breakdown donut, findings-over-time trend, stat cards, and a filterable table, with
   dashboard variables to filter by target/risk level/scan type.
 - **Raw JSON**: `curl http://localhost:8091/api/findings`, or the "View raw findings" link on
   the trigger page.
-- **PDF reports** (links on the trigger page and in the Grafana dashboard), structured after the
+- **PDF reports** (buttons in the frontend, links on the trigger page and in the Grafana dashboard), structured after the
   executive/technical split used by the OWASP WSTG reporting guide, PTES and NIST SP 800-115:
   - **Executive summary** (`/api/reports/executive`): overall risk posture, scope and
     limitations, counts by severity and OWASP Top 10 category, top 5 risks in business terms,
@@ -239,6 +249,17 @@ valid PDFs from realistic ZAP text.
 
 ```bash
 mvn test
+```
+
+Frontend unit tests (Vitest) cover the data logic behind the UI: severity normalization,
+OWASP category mapping, the summary counts and unique-vulnerability grouping (same rule as the
+PDF reports), and the table's filtering/sorting.
+
+```bash
+cd frontend
+npm ci
+npm test
+npm run dev   # dev server on http://localhost:5173, proxies /api to the backend on :8091
 ```
 
 The `Dockerfile` also runs `mvn package` (not `-DskipTests`), so `docker compose up --build`

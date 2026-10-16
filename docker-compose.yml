@@ -69,6 +69,18 @@ services:
       - devsecops-net
     restart: unless-stopped
 
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    # nginx serves the React build and proxies /api to the backend container.
+    ports:
+      - "8092:80"
+    depends_on:
+      - backend
+    networks:
+      - devsecops-net
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana-oss:latest
     container_name: grafana

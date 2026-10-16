@@ -27,6 +27,7 @@ jobs:
       ZAP_PROXY: http://localhost:8090
       ZAP: http://zap
       GRAFANA: http://localhost:3011
+      FRONTEND: http://localhost:8092
       TARGET: http://juice-shop:3000
     steps:
       - uses: actions/checkout@v5
@@ -49,6 +50,7 @@ jobs:
           wait_for "$BACKEND/api/findings"
           wait_for "$ZAP/JSON/core/view/version/" "$ZAP_PROXY"
           wait_for "$GRAFANA/api/health"
+          wait_for "$FRONTEND"
           wait_for "http://localhost:3000"
 
       - name: Run a real scan against Juice Shop
@@ -117,12 +119,24 @@ jobs:
               "rawSql":"SELECT COALESCE(owasp_category, '\''N/A'\'') AS metric, COUNT(*) AS value FROM scan_findings GROUP BY owasp_category ORDER BY value DESC"}]
           }' | jq -c '.results.A.frames[0].data.values'
 
+      - name: Check the frontend serves the app and proxies the API
+        run: |
+          curl -fsS "$FRONTEND/" | grep -q '<div id="root">' || { echo "::error::frontend did not serve the React app"; exit 1; }
+          VIA_FRONTEND=$(curl -fsS "$FRONTEND/api/findings" | jq length)
+          DIRECT=$(curl -fsS "$BACKEND/api/findings" | jq length)
+          echo "findings via frontend proxy: $VIA_FRONTEND, direct: $DIRECT"
+          [ "$VIA_FRONTEND" = "$DIRECT" ] || { echo "::error::frontend /api proxy returned different data"; exit 1; }
+          MAGIC=$(curl -fsS "$FRONTEND/api/reports/executive" | head -c 5)
+          [ "$MAGIC" = "%PDF-" ] || { echo "::error::executive PDF not reachable through the frontend"; exit 1; }
+          # Unknown paths must fall back to index.html (SPA routing).
+          curl -fsS "$FRONTEND/some/client/route" | grep -q '<div id="root">'
+
       - name: Collect container logs
         if: always()
         run: |
           mkdir -p out
           docker compose ps > out/compose-ps.txt
-          for s in backend grafana postgres; do docker logs "$s" > "out/$s.log" 2>&1 || true; done
+          for s in backend frontend grafana postgres; do docker logs "$s" > "out/$s.log" 2>&1 || true; done
 
       - uses: actions/upload-artifact@v5
         if: always()
