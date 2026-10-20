@@ -145,7 +145,9 @@ already provisioned — no manual setup needed. It'll be empty until you run a s
 ### 4. Run a scan
 
 Open **http://localhost:8092**, the React frontend. Enter a target URL (e.g.
-`http://juice-shop:3000`), optionally check specific risk levels, and click "Start scan".
+`http://juice-shop:3000`), optionally pick which active-scan rules to run (grouped by the risk
+they test for), and click "Start scan". This only limits the active scan: passive checks always
+run, so a "Low-risk" scan can still report Medium or Informational findings.
 The scan runs in the background: the app polls scan status every 2s and shows the phase
 (spider, then active scan), a progress bar, an ETA, and a "Stop scan" button to cancel it
 mid-run. Reloading the page keeps following the same scan. When it finishes, the findings
@@ -230,7 +232,7 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 
 | Method | Path                       | Description                                                             |
 |--------|----------------------------|--------------------------------------------------------------------------|
-| POST   | `/api/scans`               | Starts a spider + active scan against `targetUrl` (required query param) in the background, optionally scoped by `riskLevels` (comma-separated `HIGH,MEDIUM,LOW`). Returns `202` with the initial scan status immediately; `409` if a scan is already running. |
+| POST   | `/api/scans`               | Starts a spider + active scan against `targetUrl` (required query param) in the background, optionally scoped by `riskLevels` (comma-separated `HIGH,MEDIUM,LOW`: which active-scan rules run, not which findings are kept). Returns `202` with the initial scan status immediately; `409` if a scan is already running. |
 | GET    | `/api/scans/{scanId}`      | Current status of a scan: `phase` (`SPIDER`/`ACTIVE_SCAN`/`DONE`/`STOPPED`/`FAILED`), `percent`, `etaSeconds` (nullable), `elapsedSeconds`, and `findings` (once `DONE`/`STOPPED`: the findings this scan added; ones already stored for the target are not saved again). `404` once a newer scan has replaced it — only the current/last scan is tracked. |
 | POST   | `/api/scans/{scanId}/stop` | Requests cancellation of a running scan. Findings already collected at that point are still saved (phase becomes `STOPPED`). `404` if unknown. |
 | GET    | `/api/findings`            | Returns all stored findings, most recent first.                        |

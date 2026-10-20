@@ -134,19 +134,20 @@ export default function ScanPanel({ onScanFinished }: Props) {
           />
         </label>
         <fieldset className="field" disabled={active}>
-          <legend>Risk levels to scan for</legend>
+          <legend>Active-scan rules to run</legend>
           <div className="checkbox-row">
             {RISK_LEVELS.map((level) => (
               <label key={level} className="checkbox">
                 <input type="checkbox" checked={riskLevels.includes(level)} onChange={() => toggleRisk(level)} />
-                {level.charAt(0) + level.slice(1).toLowerCase()}
+                {level.charAt(0) + level.slice(1).toLowerCase()}-risk
               </label>
             ))}
           </div>
           <small className="muted">
             {riskLevels.length === 0
-              ? 'None selected: full scan (all rules, can take 30+ minutes).'
-              : 'Only the scan rules for the selected levels run. Low alone takes about 2 minutes.'}
+              ? 'None checked: every active-scan rule runs (can take 30+ minutes).'
+              : 'Only the active-scan rules that test for the checked risk levels run (Low-risk alone takes about 2 minutes).'}{' '}
+            Passive checks always run, so findings of any severity can appear.
           </small>
         </fieldset>
         <div className="button-row">
