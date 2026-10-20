@@ -1,6 +1,7 @@
 # End-to-end verification of the full stack with a real ZAP scan against Juice Shop.
 # Manual only (Actions tab -> "E2E verification" -> Run workflow), so it never burns
-# minutes on every push. Produces both PDF reports + a raw ZAP alert sample as artifacts.
+# minutes on every push. Produces both PDF reports, a raw ZAP alert sample and frontend
+# screenshots as artifacts.
 name: E2E verification
 
 on:
@@ -130,6 +131,14 @@ jobs:
           [ "$MAGIC" = "%PDF-" ] || { echo "::error::executive PDF not reachable through the frontend"; exit 1; }
           # Unknown paths must fall back to index.html (SPA routing).
           curl -fsS "$FRONTEND/some/client/route" | grep -q '<div id="root">'
+
+      - name: Drive the frontend in a real browser (screenshots)
+        run: |
+          # Opens the UI with the real findings, expands one, starts/reloads/stops a scan from
+          # the UI and checks phone width. Screenshots + ui-report.json land in out/ui/.
+          npm install --silent --no-save --prefix /tmp/pw playwright@1.52.0
+          (cd /tmp/pw && npx playwright install chromium)
+          PW_DIR=/tmp/pw OUT_DIR=out/ui node .github/e2e/ui-check.mjs
 
       - name: Collect container logs
         if: always()
