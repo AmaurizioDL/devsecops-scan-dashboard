@@ -73,6 +73,9 @@ services:
     build: ./frontend
     container_name: frontend
     # nginx serves the React build and proxies /api to the backend container.
+    environment:
+      # Where the "Open Grafana" button points. Empty = same host as the page, port 3011.
+      GRAFANA_URL: ${GRAFANA_URL:-}
     ports:
       - "8092:80"
     depends_on:

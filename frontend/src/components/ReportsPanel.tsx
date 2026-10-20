@@ -1,4 +1,5 @@
-import { GRAFANA_URL, REPORT_URLS } from '../api';
+import { REPORT_URLS } from '../api';
+import { GRAFANA_URL } from '../config';
 
 interface Props {
   hasFindings: boolean;

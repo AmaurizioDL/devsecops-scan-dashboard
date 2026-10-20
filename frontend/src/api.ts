@@ -44,5 +44,3 @@ export const REPORT_URLS = {
   executive: '/api/reports/executive',
   technical: '/api/reports/technical',
 };
-
-export const GRAFANA_URL: string = import.meta.env.VITE_GRAFANA_URL ?? 'http://localhost:3011';

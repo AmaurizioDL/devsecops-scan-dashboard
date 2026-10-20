@@ -42,8 +42,11 @@ try {
   check('findings table shows rows', true, await page.locator('.result-count').innerText());
   const summary = await page.locator('section[aria-labelledby="summary-title"]').innerText();
   check('summary panel rendered', summary.length > 20, summary.replace(/\s+/g, ' ').slice(0, 200));
+  // With no GRAFANA_URL configured, the link is derived from the page URL (localhost:3011 here).
   const grafanaHref = await page.getByRole('link', { name: /grafana/i }).getAttribute('href');
-  check('Grafana link present', !!grafanaHref, grafanaHref ?? 'missing');
+  const expectedGrafana = process.env.EXPECTED_GRAFANA_URL;
+  check('Grafana link points to Grafana', expectedGrafana ? grafanaHref === expectedGrafana : !!grafanaHref,
+    `${grafanaHref ?? 'missing'}${expectedGrafana ? ` (expected ${expectedGrafana})` : ''}`);
   for (const name of [/executive/i, /technical/i]) {
     const href = await page.getByRole('link', { name }).getAttribute('href');
     const res = await page.request.get(new URL(href, FRONTEND).toString());

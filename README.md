@@ -79,7 +79,10 @@ a monthly quota of Codespaces core-hours/storage; check your usage under
   `devsecops-net`. It also serves a static HTML page at `/` for triggering scans.
 - **frontend** is the React + Vite app, built in a multi-stage `frontend/Dockerfile` and
   served by nginx on `:8092`. nginx also proxies `/api/*` to `backend:8081`, so the browser
-  talks to a single origin and the backend needs no CORS configuration.
+  talks to a single origin and the backend needs no CORS configuration. Its "Open Grafana"
+  button points to `GRAFANA_URL` from `.env`, applied when the container starts (no image
+  rebuild). Left empty, it uses port 3011 on the host you opened the page from, or the
+  matching forwarded URL in Codespaces (`…-8092.app.github.dev` → `…-3011.app.github.dev`).
 - **grafana** runs in Docker, provisioned as code (`grafana/provisioning/`) — datasource and
   dashboard load automatically on `docker compose up`, no manual clicking required, and it
   reaches Postgres the same way the backend does: by container name on `devsecops-net`.
@@ -339,7 +342,7 @@ machine-specific credentials are required. `git clone` → `cp .env.example .env
 
 **How it's verified:**
 
-- 58 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 6
+- 58 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 9
   frontend Vitest tests (see [Tests](#tests)).
 - The `e2e-verify.yml` GitHub Actions workflow (manual `workflow_dispatch`) brings up the whole
   stack on a GitHub-hosted runner and scans Juice Shop. It then checks the stored findings,

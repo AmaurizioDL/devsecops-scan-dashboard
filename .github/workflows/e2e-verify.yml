@@ -132,13 +132,32 @@ jobs:
           # Unknown paths must fall back to index.html (SPA routing).
           curl -fsS "$FRONTEND/some/client/route" | grep -q '<div id="root">'
 
+      - name: Check the Grafana URL is configurable at runtime
+        run: |
+          wait_frontend() {
+            for i in $(seq 1 30); do curl -fsS -o /dev/null "$FRONTEND/config.js" && return 0; sleep 2; done
+            echo "::error::frontend did not come back"; return 1
+          }
+          echo "default: $(curl -fsS "$FRONTEND/config.js")"
+          curl -fsS "$FRONTEND/config.js" | grep -q 'grafanaUrl: ""'
+          curl -fsSI "$FRONTEND/config.js" | grep -qi 'cache-control: no-store'
+          # Override through the env var: only the container is recreated, no image rebuild.
+          GRAFANA_URL='https://grafana.example.test/d/x?a="b"' docker compose up -d --no-build frontend
+          wait_frontend
+          echo "override: $(curl -fsS "$FRONTEND/config.js")"
+          curl -fsS "$FRONTEND/config.js" | grep -qF 'grafanaUrl: "https://grafana.example.test/d/x?a=\"b\""' \
+            || { echo "::error::GRAFANA_URL override not applied"; exit 1; }
+          docker compose up -d --no-build frontend
+          wait_frontend
+          curl -fsS "$FRONTEND/config.js" | grep -q 'grafanaUrl: ""'
+
       - name: Drive the frontend in a real browser (screenshots)
         run: |
           # Opens the UI with the real findings, expands one, starts/reloads/stops a scan from
           # the UI and checks phone width. Screenshots + ui-report.json land in out/ui/.
           npm install --silent --no-save --prefix /tmp/pw playwright@1.52.0
           (cd /tmp/pw && npx playwright install chromium)
-          PW_DIR=/tmp/pw OUT_DIR=out/ui node .github/e2e/ui-check.mjs
+          PW_DIR=/tmp/pw OUT_DIR=out/ui EXPECTED_GRAFANA_URL="$GRAFANA" node .github/e2e/ui-check.mjs
 
       - name: Check the re-scan from the UI did not duplicate findings
         run: |
