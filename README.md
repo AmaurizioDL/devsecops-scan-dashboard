@@ -80,8 +80,8 @@ a monthly quota of Codespaces core-hours/storage; check your usage under
 - **frontend** is the React + Vite app, built in a multi-stage `frontend/Dockerfile` and
   served by nginx on `:8092`. nginx also proxies `/api/*` to `backend:8081`, so the browser
   talks to a single origin and the backend needs no CORS configuration. Its "Open Grafana"
-  button points to `GRAFANA_URL` from `.env`, applied when the container starts (no image
-  rebuild). Left empty, it uses port 3011 on the host you opened the page from, or the
+  button, like the link on the backend's static page, points to `GRAFANA_URL` from `.env`,
+  applied when the containers start (no image rebuild). Left empty, it uses port 3011 on the host you opened the page from, or the
   matching forwarded URL in Codespaces (`…-8092.app.github.dev` → `…-3011.app.github.dev`).
 - **grafana** runs in Docker, provisioned as code (`grafana/provisioning/`) — datasource and
   dashboard load automatically on `docker compose up`, no manual clicking required, and it
@@ -239,6 +239,7 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 | GET    | `/api/reports/executive`   | Executive summary PDF (optional `targetUrl` filter).                   |
 | GET    | `/api/reports/technical`   | Technical vulnerability report PDF (optional `targetUrl` filter). `/api/reports/pdf` is kept as an alias. |
 | GET    | `/`                        | Static HTML page to trigger a scan and link out to Grafana.            |
+| GET    | `/config.js`               | Runtime settings for that page (`GRAFANA_URL`), never cached.          |
 
 ## Tests
 
@@ -344,7 +345,7 @@ machine-specific credentials are required. `git clone` → `cp .env.example .env
 
 **How it's verified:**
 
-- 58 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 9
+- 61 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 9
   frontend Vitest tests (see [Tests](#tests)).
 - The `e2e-verify.yml` GitHub Actions workflow (manual `workflow_dispatch`) brings up the whole
   stack on a GitHub-hosted runner and scans Juice Shop. It then checks the stored findings,

@@ -80,7 +80,7 @@
 <pre id="result" hidden></pre>
 
 <div class="links">
-  <a href="http://localhost:3011/d/devsecops-scan-findings" target="_blank" rel="noopener">
+  <a id="grafana-link" href="http://localhost:3011/d/devsecops-scan-findings" target="_blank" rel="noopener">
     Open Grafana dashboard &rarr;
   </a>
   <br>
@@ -91,7 +91,23 @@
   <a href="/api/reports/technical" target="_blank" rel="noopener">Download technical vulnerability report (PDF) &rarr;</a>
 </div>
 
+<!-- Runtime settings (GRAFANA_URL), served by AppConfigController. -->
+<script src="/config.js"></script>
 <script>
+// Grafana link: the configured GRAFANA_URL, or else Grafana's port (3011) on the host this page
+// was opened from; forwarded hostnames that carry the port (Codespaces: name-8091.app.github.dev)
+// get Grafana's port instead.
+(function () {
+  let base = ((window.APP_CONFIG || {}).grafanaUrl || '').trim();
+  if (!base) {
+    const forwarded = location.hostname.replace('-8091.', '-3011.');
+    base = forwarded !== location.hostname
+        ? `${location.protocol}//${forwarded}`
+        : `${location.protocol}//${location.hostname}:3011`;
+  }
+  document.getElementById('grafana-link').href = base.replace(/\/+$/, '') + '/d/devsecops-scan-findings';
+})();
+
 const form = document.getElementById('scan-form');
 const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');

@@ -55,6 +55,18 @@ try {
   }
   await shot(page, '01-dashboard.png');
 
+  // The backend's static trigger page derives its Grafana link the same way (port 3011).
+  if (process.env.BACKEND) {
+    const staticPage = await desktop.newPage();
+    watch(staticPage);
+    await staticPage.goto(process.env.BACKEND + '/');
+    const staticHref = await staticPage.locator('#grafana-link').getAttribute('href');
+    const expectedStatic = expectedGrafana ? `${expectedGrafana}/d/devsecops-scan-findings` : null;
+    check('static page Grafana link', expectedStatic ? staticHref === expectedStatic : !!staticHref,
+      `${staticHref ?? 'missing'}${expectedStatic ? ` (expected ${expectedStatic})` : ''}`);
+    await staticPage.close();
+  }
+
   // 2. Expand the first finding to see its real ZAP detail.
   await page.locator('.finding-row .link-button').first().click();
   await page.locator('.detail-row').first().waitFor({ timeout: 5_000 });

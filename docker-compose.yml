@@ -58,6 +58,8 @@ services:
       - DB_USERNAME=${DB_USERNAME:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-changeme}
       - ZAP_BASE_URL=http://zap:8080
+      # Same GRAFANA_URL as the frontend, for the static trigger page's Grafana link.
+      - GRAFANA_URL=${GRAFANA_URL:-}
     ports:
       - "8091:8081"
     depends_on:

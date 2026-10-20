@@ -141,15 +141,28 @@ jobs:
           echo "default: $(curl -fsS "$FRONTEND/config.js")"
           curl -fsS "$FRONTEND/config.js" | grep -q 'grafanaUrl: ""'
           curl -fsSI "$FRONTEND/config.js" | grep -qi 'cache-control: no-store'
-          # Override through the env var: only the container is recreated, no image rebuild.
-          GRAFANA_URL='https://grafana.example.test/d/x?a="b"' docker compose up -d --no-build frontend
+          wait_backend() {
+            for i in $(seq 1 60); do curl -fsS -o /dev/null "$BACKEND/config.js" && return 0; sleep 3; done
+            echo "::error::backend did not come back"; return 1
+          }
+          echo "backend default: $(curl -fsS "$BACKEND/config.js")"
+          curl -fsS "$BACKEND/config.js" | grep -q 'grafanaUrl: ""'
+          curl -fsSI "$BACKEND/config.js" | grep -qi 'cache-control: no-store'
+          # Override through the env var: only the containers are recreated, no image rebuild.
+          GRAFANA_URL='https://grafana.example.test/d/x?a="b"' docker compose up -d --no-build frontend backend
           wait_frontend
+          wait_backend
           echo "override: $(curl -fsS "$FRONTEND/config.js")"
+          echo "backend override: $(curl -fsS "$BACKEND/config.js")"
           curl -fsS "$FRONTEND/config.js" | grep -qF 'grafanaUrl: "https://grafana.example.test/d/x?a=\"b\""' \
-            || { echo "::error::GRAFANA_URL override not applied"; exit 1; }
-          docker compose up -d --no-build frontend
+            || { echo "::error::GRAFANA_URL override not applied to the frontend"; exit 1; }
+          curl -fsS "$BACKEND/config.js" | grep -qF 'grafanaUrl: "https://grafana.example.test/d/x?a=\"b\""' \
+            || { echo "::error::GRAFANA_URL override not applied to the backend"; exit 1; }
+          docker compose up -d --no-build frontend backend
           wait_frontend
+          wait_backend
           curl -fsS "$FRONTEND/config.js" | grep -q 'grafanaUrl: ""'
+          curl -fsS "$BACKEND/config.js" | grep -q 'grafanaUrl: ""'
 
       - name: Drive the frontend in a real browser (screenshots)
         run: |
