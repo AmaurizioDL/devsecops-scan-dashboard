@@ -303,26 +303,40 @@ won't produce a `backend` image if a test fails.
 
 ## Project status
 
-**Complete.** The full stack — `zap`, `juice-shop`, `postgres`, `backend`, and `grafana` — runs
-end-to-end from a single `docker compose up -d --build` on a clean clone: all five containers
-reach a healthy/running state, the backend connects to the dockerized Postgres and
-applies/validates the `scan_findings` schema on startup, the Grafana datasource connects to
-Postgres over the shared `devsecops-net` network with no host-networking workarounds, and a scan
-run through `/api/scans` produces rows visible in both `/api/findings` and the Grafana dashboard
-panels — verified by querying the panels' own SQL through Grafana's API, not just that the
-dashboard loads.
+**Complete.** The full stack (`zap`, `juice-shop`, `postgres`, `backend`, `grafana`, and the
+React `frontend`) runs end-to-end from a single `docker compose up -d --build` on a clean clone.
+All six containers reach a healthy/running state. The backend validates the `scan_findings`
+schema against the dockerized Postgres on startup. Grafana connects to Postgres over the shared
+`devsecops-net` network, and the frontend reaches the backend through its own nginx `/api`
+proxy, so neither needs CORS or host-networking workarounds.
 
-Nothing depends on the machine it's built on: no native Postgres/Java/Maven install and no
+Nothing depends on the machine it's built on: no native Postgres/Java/Maven/Node install and no
 machine-specific credentials are required. `git clone` → `cp .env.example .env` →
-`docker compose up --build` is the entire setup, on any machine with Docker.
+`docker compose up -d --build` is the entire setup, on any machine with Docker.
 
-The backend has a unit test suite (16 tests, see [Tests](#tests)) that runs as part of the
-`Dockerfile` build, so a broken change can't produce a working `backend` image.
+**What's in place:**
 
-Full-coverage active scans remain memory-intensive (see Known limitations) — for routine local
-verification, scoping with `riskLevels` is recommended over unscoped full scans. Beyond that,
-what remains is the documented, deliberate scope cuts below (async scans, DTOs) — not bugs,
-just intentionally out of scope for this learning project.
+- **Scanning:** async, risk-scoped ZAP scans (spider + active scan) with per-phase progress, ETA
+  and stop, driven from the frontend at `http://localhost:8092` or directly through the API.
+- **Results:** findings in the frontend (summary by severity and OWASP Top 10 category, and a
+  filterable/searchable table) and in the provisioned Grafana dashboard.
+- **Reports:** an executive PDF and a technical PDF. Both consolidate raw ZAP alerts into unique
+  vulnerabilities mapped to OWASP Top 10:2021.
+
+**How it's verified:**
+
+- 55 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 6
+  frontend Vitest tests (see [Tests](#tests)).
+- The `e2e-verify.yml` GitHub Actions workflow (manual `workflow_dispatch`) brings up the whole
+  stack on a GitHub-hosted runner and scans Juice Shop. It then checks the stored findings,
+  downloads both PDF reports, queries Grafana's datasource and panels, and confirms the
+  frontend serves the app and proxies `/api`. Run it with
+  `gh workflow run e2e-verify.yml --ref master`.
+
+Full-coverage active scans remain memory-intensive (see Known limitations), so scoping with
+`riskLevels` is recommended over unscoped full scans for routine verification. What remains
+beyond that is the documented, deliberate scope cuts above. They are not bugs, just
+intentionally out of scope for this learning project.
 
 ## Project context
 
