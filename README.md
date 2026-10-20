@@ -228,7 +228,7 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 | Method | Path                       | Description                                                             |
 |--------|----------------------------|--------------------------------------------------------------------------|
 | POST   | `/api/scans`               | Starts a spider + active scan against `targetUrl` (required query param) in the background, optionally scoped by `riskLevels` (comma-separated `HIGH,MEDIUM,LOW`). Returns `202` with the initial scan status immediately; `409` if a scan is already running. |
-| GET    | `/api/scans/{scanId}`      | Current status of a scan: `phase` (`SPIDER`/`ACTIVE_SCAN`/`DONE`/`STOPPED`/`FAILED`), `percent`, `etaSeconds` (nullable), `elapsedSeconds`, and `findings` (once `DONE`/`STOPPED`). `404` once a newer scan has replaced it — only the current/last scan is tracked. |
+| GET    | `/api/scans/{scanId}`      | Current status of a scan: `phase` (`SPIDER`/`ACTIVE_SCAN`/`DONE`/`STOPPED`/`FAILED`), `percent`, `etaSeconds` (nullable), `elapsedSeconds`, and `findings` (once `DONE`/`STOPPED`: the findings this scan added; ones already stored for the target are not saved again). `404` once a newer scan has replaced it — only the current/last scan is tracked. |
 | POST   | `/api/scans/{scanId}/stop` | Requests cancellation of a running scan. Findings already collected at that point are still saved (phase becomes `STOPPED`). `404` if unknown. |
 | GET    | `/api/findings`            | Returns all stored findings, most recent first.                        |
 | GET    | `/api/reports/executive`   | Executive summary PDF (optional `targetUrl` filter).                   |
@@ -240,7 +240,8 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 Unit tests (JUnit 5 + Mockito + AssertJ, no Docker/database required) cover the business logic
 that matters most for correctness: the ZAP alert → `ScanFinding` mapping (including CWE-id edge
 cases: null/negative/non-numeric values), passive-vs-active dedup by alert id, the scan-timeout
-guard, `targetUrl`/`riskLevels` request validation in `ScanController`, the risk-level →
+guard, re-scan deduplication (one stored finding per rule, risk and URL per target),
+`targetUrl`/`riskLevels` request validation in `ScanController`, the risk-level →
 ZAP-scanner-id catalog, the sliding-window ETA calculation (`ScanProgressEstimator`), the
 single-current-scan conflict rule (`ScanRunRegistry`), stopping a scan mid-spider or
 mid-active-scan (partial findings still saved, ZAP's stop action called), the report
@@ -294,6 +295,19 @@ won't produce a `backend` image if a test fails.
   (`docker exec -i postgres psql -U <DB_USERNAME> -d devsecops_dashboard < db/schema.sql`), or
   reset with `docker compose down -v`. Findings stored before the upgrade show confidence
   "Unknown" and are grouped by alert name instead of ZAP rule id.
+- Findings are stored once per target, ZAP rule (`plugin_id`, or alert name for older rows),
+  risk and affected URL. Scanning the same target again only adds findings that are new; a
+  known one keeps its original `detected_at` (first seen). There is no "last seen" or "fixed"
+  tracking yet. Databases filled before this rule existed may hold duplicates; this removes
+  them and keeps the first occurrence:
+  ```sql
+  DELETE FROM scan_findings a USING scan_findings b
+  WHERE a.id > b.id
+    AND a.target_url = b.target_url
+    AND COALESCE(NULLIF(a.plugin_id, ''), a.alert_name) = COALESCE(NULLIF(b.plugin_id, ''), b.alert_name)
+    AND a.risk_level = b.risk_level
+    AND a.affected_url IS NOT DISTINCT FROM b.affected_url;
+  ```
 - Report risk and confidence are ZAP's own ratings; no CVSS score or OWASP Risk Rating is
   computed.
 - The OWASP Top 10:2021 category comes from the `OWASP_2021_Axx` tag that each ZAP rule declares;
@@ -325,7 +339,7 @@ machine-specific credentials are required. `git clone` → `cp .env.example .env
 
 **How it's verified:**
 
-- 55 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 6
+- 58 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 6
   frontend Vitest tests (see [Tests](#tests)).
 - The `e2e-verify.yml` GitHub Actions workflow (manual `workflow_dispatch`) brings up the whole
   stack on a GitHub-hosted runner and scans Juice Shop. It then checks the stored findings,

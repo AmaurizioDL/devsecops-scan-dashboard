@@ -213,6 +213,64 @@ class ScanServiceTest {
         assertThat(finding.getOwaspCategory()).isEqualTo("A06:2021");
     }
 
+    @Test
+    void startScan_rescanOfSameTarget_savesOnlyFindingsNotAlreadyStored() {
+        String targetUrl = "http://target";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
+        when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
+
+        ScanFinding storedByEarlierScan = new ScanFinding(targetUrl, "PASSIVE", "CSP Header Not Set", "Medium",
+                693, "A05:2021", targetUrl + "/ftp", "d", "s");
+        storedByEarlierScan.setPluginId("10038");
+        when(scanFindingRepository.findAllByTargetUrlOrderByDetectedAtDesc(targetUrl))
+                .thenReturn(List.of(storedByEarlierScan));
+
+        // ZAP still holds the old alert (new alert id) plus one the earlier scan did not find
+        ZapClient.ZapAlert sameAsStored = new ZapClient.ZapAlert("77", "10038", "CSP Header Not Set", "Medium",
+                "High", "693", targetUrl + "/ftp", null, "d", "s", null, null);
+        ZapClient.ZapAlert sameRuleOtherUrl = new ZapClient.ZapAlert("78", "10038", "CSP Header Not Set", "Medium",
+                "High", "693", targetUrl + "/assets", null, "d", "s", null, null);
+        when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(sameAsStored, sameRuleOtherUrl));
+
+        List<ScanFinding> saved = scanService.startScan(targetUrl, Set.of()).snapshot().findings();
+
+        assertThat(saved).extracting(ScanFinding::getAffectedUrl).containsExactly(targetUrl + "/assets");
+        verify(scanFindingRepository, times(1)).saveAll(anyList());
+    }
+
+    @Test
+    void startScan_sameRuleRiskAndUrlRepeatedInOneScan_isSavedOnce() {
+        String targetUrl = "http://target";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
+        when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
+
+        // ZAP raises one alert per parameter; the dashboard counts one per rule and URL
+        ZapClient.ZapAlert first = alert("1", "Cross-Domain Misconfiguration", "Medium", "264", targetUrl + "/", "d", "s");
+        ZapClient.ZapAlert sameKey = alert("2", "Cross-Domain Misconfiguration", "Medium", "264", targetUrl + "/", "d", "s");
+        ZapClient.ZapAlert otherRisk = alert("3", "Cross-Domain Misconfiguration", "Low", "264", targetUrl + "/", "d", "s");
+        when(zapClient.getAlerts(targetUrl))
+                .thenReturn(List.of(first, sameKey))
+                .thenReturn(List.of(first, sameKey, otherRisk));
+
+        List<ScanFinding> saved = scanService.startScan(targetUrl, Set.of()).snapshot().findings();
+
+        assertThat(saved).extracting(ScanFinding::getRiskLevel).containsExactly("Medium", "Low");
+        assertThat(saved).extracting(ScanFinding::getScanType).containsExactly("PASSIVE", "ACTIVE");
+    }
+
+    @Test
+    void findingKey_fallsBackToAlertNameWhenPluginIdIsMissing() {
+        assertThat(ScanService.findingKey(null, "XSS", "High", "http://t/a"))
+                .isEqualTo(ScanService.findingKey(" ", "XSS", "High", "http://t/a"))
+                .isNotEqualTo(ScanService.findingKey("40012", "XSS", "High", "http://t/a"));
+        assertThat(ScanService.findingKey("40012", "XSS", "High", "http://t/a"))
+                .isEqualTo(ScanService.findingKey("40012", "Cross Site Scripting", "High", "http://t/a"));
+    }
+
     /** Alerta con solo los campos que usan los tests de flujo; los campos de reporte quedan null. */
     private static ZapClient.ZapAlert alert(String id, String name, String risk, String cweid,
                                             String url, String description, String solution) {

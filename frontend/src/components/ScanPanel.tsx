@@ -194,7 +194,7 @@ export default function ScanPanel({ onScanFinished }: Props) {
             )}
             <div><dt>Elapsed</dt><dd>{formatDuration(run.elapsedSeconds)}</dd></div>
             {!active && run.findings && (
-              <div><dt>Findings saved</dt><dd>{run.findings.length}</dd></div>
+              <div><dt>New findings saved</dt><dd>{run.findings.length}</dd></div>
             )}
           </dl>
           {run.phase === 'FAILED' && run.errorMessage && (

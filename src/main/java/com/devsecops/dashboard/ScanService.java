@@ -4,6 +4,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -63,6 +65,10 @@ public class ScanService {
      * tardar mucho mas, excede el timeout o se detiene); las que aparecen recien despues
      * del active scan se guardan como ACTIVE.
      * <p>
+     * Solo se guardan hallazgos nuevos para el target (ver findingKey): ZAP conserva en su
+     * sesion las alertas de scans anteriores y un re-scan vuelve a encontrar lo mismo, asi que
+     * sin este filtro cada scan duplicaba los hallazgos ya guardados.
+     * <p>
      * Si riskLevels no es null/vacio, el active scan se acota a solo los scanners de esas
      * categorias de riesgo (ver ZapScannerRiskCatalog), para reducir el tiempo de scan
      * cuando no se necesita cobertura completa.
@@ -80,14 +86,12 @@ public class ScanService {
                 zapClient.stopSpiderScan(spiderScanId);
             }
 
-            List<ZapClient.ZapAlert> passiveAlerts = zapClient.getAlerts(targetUrl);
-            Set<String> passiveAlertIds = passiveAlerts.stream()
-                    .map(ZapClient.ZapAlert::id)
-                    .collect(Collectors.toSet());
-            List<ScanFinding> passiveFindings = scanFindingRepository.saveAll(
-                    passiveAlerts.stream()
-                            .map(alert -> toScanFinding(targetUrl, alert, "PASSIVE", LocalDateTime.now()))
-                            .toList());
+            Set<String> knownKeys = scanFindingRepository.findAllByTargetUrlOrderByDetectedAtDesc(targetUrl).stream()
+                    .map(f -> findingKey(f.getPluginId(), f.getAlertName(), f.getRiskLevel(), f.getAffectedUrl()))
+                    .collect(Collectors.toCollection(HashSet::new));
+
+            List<ScanFinding> passiveFindings = saveNewFindings(
+                    targetUrl, zapClient.getAlerts(targetUrl), "PASSIVE", knownKeys);
 
             if (stoppedDuringSpider) {
                 run.markStopped(passiveFindings);
@@ -102,11 +106,8 @@ public class ScanService {
                 zapClient.stopActiveScan(activeScanId);
             }
 
-            List<ScanFinding> activeFindings = scanFindingRepository.saveAll(
-                    zapClient.getAlerts(targetUrl).stream()
-                            .filter(alert -> !passiveAlertIds.contains(alert.id()))
-                            .map(alert -> toScanFinding(targetUrl, alert, "ACTIVE", LocalDateTime.now()))
-                            .toList());
+            List<ScanFinding> activeFindings = saveNewFindings(
+                    targetUrl, zapClient.getAlerts(targetUrl), "ACTIVE", knownKeys);
 
             List<ScanFinding> allFindings = Stream.concat(passiveFindings.stream(), activeFindings.stream()).toList();
 
@@ -149,6 +150,31 @@ public class ScanService {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrumpido mientras se esperaba a que ZAP terminara el scan", e);
         }
+    }
+
+    /**
+     * Saves the alerts whose finding key is not in knownKeys (and adds their keys to it), so
+     * an alert already stored, or repeated within the same batch, is never saved twice.
+     */
+    private List<ScanFinding> saveNewFindings(String targetUrl, List<ZapClient.ZapAlert> alerts,
+                                              String scanType, Set<String> knownKeys) {
+        List<ScanFinding> newFindings = new ArrayList<>();
+        for (ZapClient.ZapAlert alert : alerts) {
+            if (knownKeys.add(findingKey(alert.pluginId(), alert.alert(), alert.risk(), alert.url()))) {
+                newFindings.add(toScanFinding(targetUrl, alert, scanType, LocalDateTime.now()));
+            }
+        }
+        return newFindings.isEmpty() ? List.of() : scanFindingRepository.saveAll(newFindings);
+    }
+
+    /**
+     * One finding per ZAP rule, risk and affected URL within a target (the rule is identified
+     * by pluginId, or by alert name for rows stored before pluginId existed), the same rule
+     * key the reports use to consolidate vulnerabilities.
+     */
+    static String findingKey(String pluginId, String alertName, String riskLevel, String affectedUrl) {
+        String rule = pluginId != null && !pluginId.isBlank() ? pluginId : alertName;
+        return rule + '|' + riskLevel + '|' + affectedUrl;
     }
 
     private ScanFinding toScanFinding(String targetUrl, ZapClient.ZapAlert alert, String scanType, LocalDateTime detectedAt) {

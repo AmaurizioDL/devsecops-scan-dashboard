@@ -140,6 +140,18 @@ jobs:
           (cd /tmp/pw && npx playwright install chromium)
           PW_DIR=/tmp/pw OUT_DIR=out/ui node .github/e2e/ui-check.mjs
 
+      - name: Check the re-scan from the UI did not duplicate findings
+        run: |
+          # The UI step scanned the same target a second time; every finding must still be
+          # stored once per rule (plugin_id, or alert name), risk and affected URL.
+          psql() { docker exec postgres psql -U postgres -d devsecops_dashboard -At -c "$1"; }
+          echo "rows after both scans: $(psql "SELECT COUNT(*) FROM scan_findings")"
+          DUPES=$(psql "SELECT COUNT(*) FROM (SELECT 1 FROM scan_findings
+            GROUP BY target_url, COALESCE(NULLIF(plugin_id, ''), alert_name), risk_level, affected_url
+            HAVING COUNT(*) > 1) d")
+          echo "duplicated finding keys: $DUPES"
+          [ "$DUPES" -eq 0 ] || { echo "::error::re-scan stored $DUPES duplicated findings"; exit 1; }
+
       - name: Collect container logs
         if: always()
         run: |
