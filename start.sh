@@ -56,7 +56,10 @@ ScanDash is running.
 Stop it with: docker compose down   (findings are kept; 'docker compose down -v' wipes them)
 EOF
 
-if command -v open > /dev/null; then open "$UI_URL"
-elif command -v xdg-open > /dev/null; then xdg-open "$UI_URL" > /dev/null 2>&1 &
-elif command -v cmd.exe > /dev/null; then cmd.exe /c start "" "$UI_URL"
-fi
+# Best effort: a machine without a browser (a server, CI) just keeps the URLs printed above.
+# Picked by OS, since Linux can also have an unrelated 'open' command.
+case "$(uname -s)" in
+  Darwin) open "$UI_URL" > /dev/null 2>&1 || true ;;
+  MINGW* | MSYS* | CYGWIN*) cmd.exe /c start "" "$UI_URL" > /dev/null 2>&1 || true ;;
+  *) xdg-open "$UI_URL" > /dev/null 2>&1 || true ;;
+esac
