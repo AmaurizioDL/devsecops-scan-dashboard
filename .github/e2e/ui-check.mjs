@@ -120,8 +120,11 @@ try {
   await page.getByRole('button', { name: 'Start scan' }).click();
   await page.locator('.progress').waitFor({ timeout: 30_000 });
   check('scan started from the UI', true);
+  // The history reloads right after the start response, so give that request a moment.
+  const listed = await page.locator('.scan-row').first().filter({ hasText: 'Running' })
+    .waitFor({ timeout: 10_000 }).then(() => true, () => false);
   const running = await page.locator('.scan-row').first().innerText();
-  check('history lists the new scan as Running', /Running/.test(running), running.replace(/\s+/g, ' '));
+  check('history lists the new scan as Running', listed, running.replace(/\s+/g, ' '));
   await page.waitForFunction(
     () => Number(document.querySelector('.progress')?.getAttribute('aria-valuenow') ?? 0) > 0,
     null,
