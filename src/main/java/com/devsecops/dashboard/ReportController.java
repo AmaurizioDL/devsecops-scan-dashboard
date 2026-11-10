@@ -18,14 +18,16 @@ public class ReportController {
     }
 
     @GetMapping("/api/reports/executive")
-    public ResponseEntity<byte[]> getExecutiveReportPdf(@RequestParam(required = false) String targetUrl) {
-        return pdfResponse(vulnerabilityReportService.generateExecutivePdf(targetUrl), "executive-security-summary.pdf");
+    public ResponseEntity<byte[]> getExecutiveReportPdf(@RequestParam(required = false) String targetUrl,
+                                                        @RequestParam(required = false) String scanId) {
+        return pdfResponse(vulnerabilityReportService.generateExecutivePdf(targetUrl, scanId), "executive-security-summary.pdf");
     }
 
     /** /api/reports/pdf se mantiene como alias del reporte tecnico para no romper links existentes. */
     @GetMapping({"/api/reports/technical", "/api/reports/pdf"})
-    public ResponseEntity<byte[]> getTechnicalReportPdf(@RequestParam(required = false) String targetUrl) {
-        return pdfResponse(vulnerabilityReportService.generateTechnicalPdf(targetUrl), "technical-vulnerability-report.pdf");
+    public ResponseEntity<byte[]> getTechnicalReportPdf(@RequestParam(required = false) String targetUrl,
+                                                        @RequestParam(required = false) String scanId) {
+        return pdfResponse(vulnerabilityReportService.generateTechnicalPdf(targetUrl, scanId), "technical-vulnerability-report.pdf");
     }
 
     private ResponseEntity<byte[]> pdfResponse(byte[] pdf, String filename) {

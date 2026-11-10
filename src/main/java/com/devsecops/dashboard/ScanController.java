@@ -22,10 +22,27 @@ public class ScanController {
 
     private final ScanService scanService;
     private final ScanFindingRepository scanFindingRepository;
+    private final ScanRecordRepository scanRecordRepository;
 
-    public ScanController(ScanService scanService, ScanFindingRepository scanFindingRepository) {
+    public ScanController(ScanService scanService, ScanFindingRepository scanFindingRepository,
+                          ScanRecordRepository scanRecordRepository) {
         this.scanService = scanService;
         this.scanFindingRepository = scanFindingRepository;
+        this.scanRecordRepository = scanRecordRepository;
+    }
+
+    /** Scan history, newest first. */
+    @GetMapping("/api/scans")
+    public List<ScanRecord> listScans() {
+        return scanRecordRepository.findAllByOrderByStartedAtDesc();
+    }
+
+    /** The scan running right now, or 204 when none is. */
+    @GetMapping("/api/scans/current")
+    public ResponseEntity<ScanRunView> getCurrentScan() {
+        return scanService.findActiveRun()
+                .map(run -> ResponseEntity.ok(ScanRunView.from(run)))
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     @PostMapping("/api/scans")
@@ -95,8 +112,11 @@ public class ScanController {
         }
     }
 
+    /** All findings, or with scanId only the ones that scan found for the first time. */
     @GetMapping("/api/findings")
-    public List<ScanFinding> listFindings() {
-        return scanFindingRepository.findAllByOrderByDetectedAtDesc();
+    public List<ScanFinding> listFindings(@RequestParam(required = false) String scanId) {
+        return StringUtils.hasText(scanId)
+                ? scanFindingRepository.findAllByScanRunIdOrderByDetectedAtDesc(scanId)
+                : scanFindingRepository.findAllByOrderByDetectedAtDesc();
     }
 }

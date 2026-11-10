@@ -6,8 +6,11 @@ visualizes them in a [Grafana](https://grafana.com/) dashboard. Built as a hands
 project (QA → DevSecOps transition) — it's usable against any site you are authorized to scan.
 
 The main UI is a **React + Vite single-page app** (`frontend/`, served by nginx on
-http://localhost:8092): start a scan and follow its progress/ETA, browse and filter findings,
-see a severity and OWASP Top 10 summary, and download the executive and technical PDF reports.
+http://localhost:8092) with a sidebar and four views: an **Overview** (KPI cards, severity mix,
+OWASP Top 10 chart, new findings per scan), **Findings** (filter by target, severity, OWASP
+category or text, with a detail panel per finding), **Scans** (start a scan and follow its
+progress/ETA, plus the full scan history with a page per scan) and **Reports** (executive and
+technical PDFs for all findings, one target or one scan). Light and dark mode included.
 Grafana stays alongside it for historical, observability-style dashboards (severity breakdown,
 findings-over-time trend, stat cards), the panel layout used by AppSec tools like DefectDojo,
 OWASP Dependency-Track, and GitLab's Security Dashboard.
@@ -184,10 +187,18 @@ the ways to cut that short.
 
 ### 5. View the results
 
-- **Frontend** (http://localhost:8092): stat cards (total findings, unique vulnerabilities,
-  counts by severity), a bar chart of findings by OWASP Top 10 category (also viewable as a
-  table), and a findings table with search (alert, URL, `CWE-79`), severity and OWASP filters,
-  and expandable rows with description, remediation, evidence and references.
+- **Frontend** (http://localhost:8092):
+  - *Overview*: KPI cards, a severity donut, findings by OWASP Top 10 category, a stacked chart
+    of the new findings each scan added (by severity), and the most recent scans. Every chart
+    can be switched to a table.
+  - *Findings*: search (alert, URL, `CWE-79`) plus target, severity and OWASP filters; clicking
+    a finding opens a side panel with description, remediation, evidence, references and the
+    scan that first found it.
+  - *Scans*: the scan form with live progress, and the scan history (status, rules, duration,
+    new findings by severity). Each scan has its own page with its findings and PDF buttons.
+  - *Reports*: both PDFs scoped to all findings, one target or one scan, and the Grafana link.
+  - Views are hash routes (`#/findings`, `#/scans/<id>`), so each one can be bookmarked. A
+    running scan shows in the sidebar from any view, and the UI picks it up again after a reload.
 - **Grafana** (http://localhost:3011) — the "DevSecOps Scan Findings" dashboard: severity
   breakdown donut, findings-over-time trend, stat cards, and a filterable table, with
   dashboard variables to filter by target/risk level/scan type.
@@ -233,11 +244,13 @@ This works unmodified because `application.properties` defaults `DB_HOST`/`ZAP_B
 | Method | Path                       | Description                                                             |
 |--------|----------------------------|--------------------------------------------------------------------------|
 | POST   | `/api/scans`               | Starts a spider + active scan against `targetUrl` (required query param) in the background, optionally scoped by `riskLevels` (comma-separated `HIGH,MEDIUM,LOW`: which active-scan rules run, not which findings are kept). Returns `202` with the initial scan status immediately; `409` if a scan is already running. |
+| GET    | `/api/scans`               | Scan history, newest first: target, `riskLevels`, `status` (`RUNNING`/`DONE`/`STOPPED`/`FAILED`), start/finish time, error message, and how many findings of each severity the scan saved for the first time. |
+| GET    | `/api/scans/current`       | The running scan (same shape as `/api/scans/{scanId}`), or `204` when none is running. |
 | GET    | `/api/scans/{scanId}`      | Current status of a scan: `phase` (`SPIDER`/`ACTIVE_SCAN`/`DONE`/`STOPPED`/`FAILED`), `percent`, `etaSeconds` (nullable), `elapsedSeconds`, and `findings` (once `DONE`/`STOPPED`: the findings this scan added; ones already stored for the target are not saved again). `404` once a newer scan has replaced it — only the current/last scan is tracked. |
 | POST   | `/api/scans/{scanId}/stop` | Requests cancellation of a running scan. Findings already collected at that point are still saved (phase becomes `STOPPED`). `404` if unknown. |
-| GET    | `/api/findings`            | Returns all stored findings, most recent first.                        |
-| GET    | `/api/reports/executive`   | Executive summary PDF (optional `targetUrl` filter).                   |
-| GET    | `/api/reports/technical`   | Technical vulnerability report PDF (optional `targetUrl` filter). `/api/reports/pdf` is kept as an alias. |
+| GET    | `/api/findings`            | Returns all stored findings, most recent first. With `?scanId=`, only the findings that scan found for the first time. |
+| GET    | `/api/reports/executive`   | Executive summary PDF (optional `targetUrl` or `scanId` filter; `scanId` wins). |
+| GET    | `/api/reports/technical`   | Technical vulnerability report PDF (same filters). `/api/reports/pdf` is kept as an alias. |
 | GET    | `/`                        | Static HTML page to trigger a scan and link out to Grafana.            |
 | GET    | `/config.js`               | Runtime settings for that page (`GRAFANA_URL`), never cached.          |
 
@@ -249,7 +262,10 @@ cases: null/negative/non-numeric values), passive-vs-active dedup by alert id, t
 guard, re-scan deduplication (one stored finding per rule, risk and URL per target),
 `targetUrl`/`riskLevels` request validation in `ScanController`, the risk-level →
 ZAP-scanner-id catalog, the sliding-window ETA calculation (`ScanProgressEstimator`), the
-single-current-scan conflict rule (`ScanRunRegistry`), stopping a scan mid-spider or
+single-current-scan conflict rule (`ScanRunRegistry`), the scan history (a row per scan with
+its final status and new-finding counts, findings linked to the scan that found them, rows left
+`RUNNING` by a restart closed as `FAILED`, and the scan slot freed even if the database write
+fails), stopping a scan mid-spider or
 mid-active-scan (partial findings still saved, ZAP's stop action called), the report
 consolidation/ordering rules (`VulnerabilityConsolidator`), and that both PDF reports render
 valid PDFs from realistic ZAP text.
@@ -260,7 +276,8 @@ mvn test
 
 Frontend unit tests (Vitest) cover the data logic behind the UI: severity normalization,
 OWASP category mapping, the summary counts and unique-vulnerability grouping (same rule as the
-PDF reports), and the table's filtering/sorting.
+PDF reports), the table's filtering (including by target) and sorting, the scan-history
+helpers behind the trend chart, and the hash routes.
 
 ```bash
 cd frontend
@@ -277,9 +294,9 @@ won't produce a `backend` image if a test fails.
 - Only one scan runs at a time — there's a single tracked "current scan" slot, not a job queue.
   This matches how ZAP itself and the project's usage pattern already work; a second
   `POST /api/scans` while one is running gets `409 Conflict` instead of being queued.
-- Scan progress/state is in-memory only (`ScanRunRegistry`), not persisted. If the backend
-  restarts mid-scan, tracking is lost — ZAP itself keeps running the orphaned scan in that edge
-  case. Reconciling on startup is out of scope for now.
+- Live progress (percent, ETA) is in memory only (`ScanRunRegistry`); the scan *history*
+  (`scan_runs`) is persisted. If the backend restarts mid-scan, that scan's history row is
+  closed as `FAILED` on the next startup, but ZAP itself keeps running the orphaned scan.
 - The ETA shown during a scan is a short-term extrapolation (recent %/second, via
   `ScanProgressEstimator`), not a historical average per target — it can swing early in a
   phase before enough samples accumulate ("calculando…" until then), and phase 2 (active scan)
@@ -296,15 +313,19 @@ won't produce a `backend` image if a test fails.
   `docker compose down -v` deletes findings/dashboards state along with the containers.
 - Upgrading an existing database: `db/schema.sql` only runs automatically on a fresh `pgdata`
   volume. If your volume predates the report columns (`confidence`, `plugin_id`, `evidence`,
-  `reference`), the backend will refuse to start (`ddl-auto=validate`). Either re-run the schema
+  `reference`) or the scan history (`scan_runs` table, `scan_findings.scan_run_id`), the
+  backend will refuse to start (`ddl-auto=validate`). Either re-run the schema
   file, which adds them idempotently without deleting findings
   (`docker exec -i postgres psql -U <DB_USERNAME> -d devsecops_dashboard < db/schema.sql`), or
   reset with `docker compose down -v`. Findings stored before the upgrade show confidence
-  "Unknown" and are grouped by alert name instead of ZAP rule id.
+  "Unknown" and are grouped by alert name instead of ZAP rule id, and findings stored before the
+  scan history existed are not linked to any scan.
 - Findings are stored once per target, ZAP rule (`plugin_id`, or alert name for older rows),
   risk and affected URL. Scanning the same target again only adds findings that are new; a
   known one keeps its original `detected_at` (first seen). There is no "last seen" or "fixed"
-  tracking yet. Databases filled before this rule existed may hold duplicates; this removes
+  tracking yet, so the history's per-scan counts (and the "new findings per scan" chart) show
+  what each scan found for the first time, not how many issues were still open at that point.
+  Databases filled before this rule existed may hold duplicates; this removes
   them and keeps the first occurrence:
   ```sql
   DELETE FROM scan_findings a USING scan_findings b
@@ -338,19 +359,23 @@ machine-specific credentials are required. `git clone` → `cp .env.example .env
 
 - **Scanning:** async, risk-scoped ZAP scans (spider + active scan) with per-phase progress, ETA
   and stop, driven from the frontend at `http://localhost:8092` or directly through the API.
-- **Results:** findings in the frontend (summary by severity and OWASP Top 10 category, and a
-  filterable/searchable table) and in the provisioned Grafana dashboard.
-- **Reports:** an executive PDF and a technical PDF. Both consolidate raw ZAP alerts into unique
+- **Results:** findings in the frontend (overview with severity, OWASP Top 10 and per-scan
+  charts, a filterable/searchable table with a detail panel, and the scan history with a page
+  per scan) and in the provisioned Grafana dashboard.
+- **Reports:** an executive PDF and a technical PDF, for all findings, one target or one scan. Both consolidate raw ZAP alerts into unique
   vulnerabilities mapped to OWASP Top 10:2021.
 
 **How it's verified:**
 
-- 61 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 9
+- 72 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 16
   frontend Vitest tests (see [Tests](#tests)).
 - The `e2e-verify.yml` GitHub Actions workflow (manual `workflow_dispatch`) brings up the whole
   stack on a GitHub-hosted runner and scans Juice Shop. It then checks the stored findings,
-  downloads both PDF reports, queries Grafana's datasource and panels, and confirms the
-  frontend serves the app and proxies `/api`. Run it with
+  checks the scan history row and the findings linked to it, downloads the PDF reports (also
+  per scan), queries Grafana's datasource and panels, and confirms the frontend serves the app
+  and proxies `/api`. Then it drives the UI in headless Chromium (every view, the finding
+  panel, the target filter, a scan started, followed across a reload and stopped from the UI,
+  dark mode and phone width) and saves screenshots as artifacts. Run it with
   `gh workflow run e2e-verify.yml --ref master`.
 
 Full-coverage active scans remain memory-intensive (see Known limitations), so scoping with

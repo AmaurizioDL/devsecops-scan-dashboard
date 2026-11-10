@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { filterFindings, formatDuration, normalizeSeverity, owaspKey, summarize } from './findings';
+import {
+  filterFindings, formatDuration, NO_FILTERS, normalizeSeverity, owaspKey, summarize, targetsOf,
+} from './findings';
 import type { Finding } from './types';
 
 function finding(overrides: Partial<Finding>): Finding {
@@ -7,7 +9,7 @@ function finding(overrides: Partial<Finding>): Finding {
     id: 1, targetUrl: 'http://juice-shop:3000', scanType: 'ACTIVE', alertName: 'Alert',
     riskLevel: 'Low', cweId: null, owaspCategory: null, affectedUrl: null, description: null,
     solution: null, confidence: null, pluginId: null, evidence: null, reference: null,
-    detectedAt: null, ...overrides,
+    detectedAt: null, scanRunId: null, ...overrides,
   };
 }
 
@@ -51,7 +53,7 @@ describe('filterFindings', () => {
     finding({ id: 2, riskLevel: 'High', alertName: 'SQL Injection', affectedUrl: 'http://x/rest/products', cweId: 89 }),
     finding({ id: 3, riskLevel: 'Low', alertName: 'Timestamp disclosure', detectedAt: '2026-10-15T10:00:00' }),
   ];
-  const none = { severity: '' as const, owasp: '', search: '' };
+  const none = NO_FILTERS;
 
   it('sorts by severity first, then newest first', () => {
     expect(filterFindings(findings, none).map((f) => f.id)).toEqual([2, 3, 1]);
@@ -61,6 +63,13 @@ describe('filterFindings', () => {
     expect(filterFindings(findings, { ...none, severity: 'Low' }).map((f) => f.id)).toEqual([3, 1]);
     expect(filterFindings(findings, { ...none, search: 'products' }).map((f) => f.id)).toEqual([2]);
     expect(filterFindings(findings, { ...none, search: 'CWE-89' }).map((f) => f.id)).toEqual([2]);
+  });
+
+  it('filters by exact target URL and lists the distinct targets', () => {
+    const mixed = [...findings, finding({ id: 4, targetUrl: 'http://other:8080' })];
+    expect(filterFindings(mixed, { ...none, target: 'http://other:8080' }).map((f) => f.id)).toEqual([4]);
+    expect(filterFindings(mixed, { ...none, target: 'http://other' })).toEqual([]);
+    expect(targetsOf(mixed)).toEqual(['http://juice-shop:3000', 'http://other:8080']);
   });
 });
 

@@ -1,6 +1,8 @@
 package com.devsecops.dashboard;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -12,13 +14,13 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 public class ScanService {
 
     private final ZapClient zapClient;
     private final ScanFindingRepository scanFindingRepository;
+    private final ScanRecordRepository scanRecordRepository;
     private final ScanRunRegistry scanRunRegistry;
     private final ExecutorService executorService;
     private final long pollIntervalMs;
@@ -26,12 +28,14 @@ public class ScanService {
 
     public ScanService(ZapClient zapClient,
                         ScanFindingRepository scanFindingRepository,
+                        ScanRecordRepository scanRecordRepository,
                         ScanRunRegistry scanRunRegistry,
                         ExecutorService executorService,
                         @Value("${zap.scan.poll-interval-ms:2000}") long pollIntervalMs,
                         @Value("${zap.scan.max-wait-ms:600000}") long maxWaitMs) {
         this.zapClient = zapClient;
         this.scanFindingRepository = scanFindingRepository;
+        this.scanRecordRepository = scanRecordRepository;
         this.scanRunRegistry = scanRunRegistry;
         this.executorService = executorService;
         this.pollIntervalMs = pollIntervalMs;
@@ -45,12 +49,38 @@ public class ScanService {
      */
     public ScanRun startScan(String targetUrl, Set<ScanRiskLevel> riskLevels) {
         ScanRun run = scanRunRegistry.begin(targetUrl, riskLevels);
+        try {
+            scanRecordRepository.save(ScanRecord.startedFrom(run));
+        } catch (RuntimeException e) {
+            // Free the single scan slot: this run will never be executed.
+            run.markFailed(e.getMessage());
+            throw e;
+        }
         executorService.submit(() -> executeScan(run));
         return run;
     }
 
     public Optional<ScanRun> findRun(String scanId) {
         return scanRunRegistry.find(scanId);
+    }
+
+    /** The scan running right now, if any (lets the UI resume following it after a reload). */
+    public Optional<ScanRun> findActiveRun() {
+        return scanRunRegistry.current().filter(ScanRun::isActive);
+    }
+
+    /**
+     * A scan only runs inside this process, so on startup any history row still RUNNING
+     * belongs to a backend that died mid-scan and is closed as FAILED.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void closeInterruptedScans() {
+        List<ScanRecord> interrupted = scanRecordRepository.findAllByStatus(ScanRecord.RUNNING);
+        LocalDateTime now = LocalDateTime.now();
+        interrupted.forEach(record -> record.markInterrupted(now));
+        if (!interrupted.isEmpty()) {
+            scanRecordRepository.saveAll(interrupted);
+        }
     }
 
     public void requestStop(String scanId) {
@@ -76,6 +106,8 @@ public class ScanService {
     // Package-private (not private) so tests can drive it directly with a pre-built,
     // already-flagged-for-stop ScanRun without needing real thread concurrency.
     void executeScan(ScanRun run) {
+        // Every finding saved so far, so a scan that fails half way still records them.
+        List<ScanFinding> savedFindings = new ArrayList<>();
         try {
             String targetUrl = run.getTargetUrl();
 
@@ -90,11 +122,10 @@ public class ScanService {
                     .map(f -> findingKey(f.getPluginId(), f.getAlertName(), f.getRiskLevel(), f.getAffectedUrl()))
                     .collect(Collectors.toCollection(HashSet::new));
 
-            List<ScanFinding> passiveFindings = saveNewFindings(
-                    targetUrl, zapClient.getAlerts(targetUrl), "PASSIVE", knownKeys);
+            savedFindings.addAll(saveNewFindings(run, zapClient.getAlerts(targetUrl), "PASSIVE", knownKeys));
 
             if (stoppedDuringSpider) {
-                run.markStopped(passiveFindings);
+                finish(run, ScanPhase.STOPPED, savedFindings, null);
                 return;
             }
 
@@ -106,18 +137,32 @@ public class ScanService {
                 zapClient.stopActiveScan(activeScanId);
             }
 
-            List<ScanFinding> activeFindings = saveNewFindings(
-                    targetUrl, zapClient.getAlerts(targetUrl), "ACTIVE", knownKeys);
+            savedFindings.addAll(saveNewFindings(run, zapClient.getAlerts(targetUrl), "ACTIVE", knownKeys));
 
-            List<ScanFinding> allFindings = Stream.concat(passiveFindings.stream(), activeFindings.stream()).toList();
-
-            if (stoppedDuringActiveScan) {
-                run.markStopped(allFindings);
-            } else {
-                run.markDone(allFindings);
-            }
+            finish(run, stoppedDuringActiveScan ? ScanPhase.STOPPED : ScanPhase.DONE, savedFindings, null);
         } catch (Exception e) {
-            run.markFailed(e.getMessage());
+            finish(run, ScanPhase.FAILED, savedFindings, e.getMessage());
+        }
+    }
+
+    /**
+     * Closes the scan's history row, then publishes the final state to pollers, so the UI
+     * never sees a finished scan still listed as RUNNING. The in-memory run is marked even
+     * if saving the row fails, otherwise the single scan slot would stay taken forever.
+     */
+    private void finish(ScanRun run, ScanPhase phase, List<ScanFinding> savedFindings, String errorMessage) {
+        List<ScanFinding> findings = List.copyOf(savedFindings);
+        try {
+            ScanRecord record = scanRecordRepository.findById(run.getScanId())
+                    .orElseGet(() -> ScanRecord.startedFrom(run));
+            record.finish(phase, findings, errorMessage, LocalDateTime.now());
+            scanRecordRepository.save(record);
+        } finally {
+            switch (phase) {
+                case DONE -> run.markDone(findings);
+                case STOPPED -> run.markStopped(findings);
+                default -> run.markFailed(errorMessage);
+            }
         }
     }
 
@@ -156,12 +201,14 @@ public class ScanService {
      * Saves the alerts whose finding key is not in knownKeys (and adds their keys to it), so
      * an alert already stored, or repeated within the same batch, is never saved twice.
      */
-    private List<ScanFinding> saveNewFindings(String targetUrl, List<ZapClient.ZapAlert> alerts,
+    private List<ScanFinding> saveNewFindings(ScanRun run, List<ZapClient.ZapAlert> alerts,
                                               String scanType, Set<String> knownKeys) {
         List<ScanFinding> newFindings = new ArrayList<>();
         for (ZapClient.ZapAlert alert : alerts) {
             if (knownKeys.add(findingKey(alert.pluginId(), alert.alert(), alert.risk(), alert.url()))) {
-                newFindings.add(toScanFinding(targetUrl, alert, scanType, LocalDateTime.now()));
+                ScanFinding finding = toScanFinding(run.getTargetUrl(), alert, scanType, LocalDateTime.now());
+                finding.setScanRunId(run.getScanId());
+                newFindings.add(finding);
             }
         }
         return newFindings.isEmpty() ? List.of() : scanFindingRepository.saveAll(newFindings);

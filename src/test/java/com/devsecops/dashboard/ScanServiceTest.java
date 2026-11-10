@@ -3,14 +3,18 @@ package com.devsecops.dashboard;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -28,16 +32,124 @@ class ScanServiceTest {
     @Mock
     private ScanFindingRepository scanFindingRepository;
 
+    @Mock
+    private ScanRecordRepository scanRecordRepository;
+
     private ScanRunRegistry scanRunRegistry;
     private ScanService scanService;
 
     @BeforeEach
     void setUp() {
         scanRunRegistry = new ScanRunRegistry(15);
-        scanService = new ScanService(zapClient, scanFindingRepository, scanRunRegistry,
+        scanService = new ScanService(zapClient, scanFindingRepository, scanRecordRepository, scanRunRegistry,
                 new SynchronousExecutorService(), 1L, 5_000L);
         lenient().when(scanFindingRepository.saveAll(anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    @Test
+    void startScan_recordsHistoryRowAndLinksNewFindingsToTheScan() {
+        String targetUrl = "http://juice-shop:3000";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
+        when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
+        ZapClient.ZapAlert low = alert("1", "Directory Browsing", "Low", "0", targetUrl + "/a", "d", "s");
+        ZapClient.ZapAlert high = alert("2", "SQL Injection", "High", "89", targetUrl + "/b", "d", "s");
+        ZapClient.ZapAlert info = alert("3", "Modern Web App", "Informational", "0", targetUrl + "/c", "d", "s");
+        when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(low), List.of(low, high, info));
+
+        ScanRun run = scanService.startScan(targetUrl, Set.of(ScanRiskLevel.LOW, ScanRiskLevel.HIGH));
+
+        assertThat(run.snapshot().findings()).extracting(ScanFinding::getScanRunId)
+                .containsOnly(run.getScanId());
+        ArgumentCaptor<ScanRecord> saved = ArgumentCaptor.forClass(ScanRecord.class);
+        verify(scanRecordRepository, times(2)).save(saved.capture());
+        ScanRecord started = saved.getAllValues().get(0);
+        assertThat(started.getId()).isEqualTo(run.getScanId());
+        assertThat(started.getRiskLevels()).isEqualTo("HIGH,LOW");
+        ScanRecord finished = saved.getAllValues().get(1);
+        assertThat(finished.getStatus()).isEqualTo("DONE");
+        assertThat(finished.getFinishedAt()).isNotNull();
+        assertThat(finished.getNewHigh()).isEqualTo(1);
+        assertThat(finished.getNewMedium()).isZero();
+        assertThat(finished.getNewLow()).isEqualTo(1);
+        assertThat(finished.getNewInformational()).isEqualTo(1);
+    }
+
+    @Test
+    void executeScan_zapFailsAfterPassiveFindings_recordsFailedWithTheFindingsSaved() {
+        String targetUrl = "http://target";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.getAlerts(targetUrl)).thenReturn(List.of(
+                alert("1", "CSP Header Not Set", "Medium", "693", targetUrl, "d", "s")));
+        when(zapClient.startActiveScan(targetUrl)).thenThrow(new IllegalStateException("ZAP is down"));
+        ScanRun run = scanRunRegistry.begin(targetUrl, Set.of());
+        ScanRecord existing = ScanRecord.startedFrom(run);
+        when(scanRecordRepository.findById(run.getScanId())).thenReturn(Optional.of(existing));
+
+        scanService.executeScan(run);
+
+        assertThat(run.snapshot().phase()).isEqualTo(ScanPhase.FAILED);
+        verify(scanRecordRepository).save(existing);
+        assertThat(existing.getStatus()).isEqualTo("FAILED");
+        assertThat(existing.getErrorMessage()).isEqualTo("ZAP is down");
+        assertThat(existing.getNewMedium()).isEqualTo(1);
+    }
+
+    @Test
+    void executeScan_historyRowCannotBeSaved_stillFreesTheScanSlot() {
+        String targetUrl = "http://target";
+        when(zapClient.startSpiderScan(targetUrl)).thenReturn("spider-1");
+        when(zapClient.getSpiderStatus("spider-1")).thenReturn(100);
+        when(zapClient.startActiveScan(targetUrl)).thenReturn("active-1");
+        when(zapClient.getActiveScanStatus("active-1")).thenReturn(100);
+        when(zapClient.getAlerts(targetUrl)).thenReturn(List.of());
+        when(scanRecordRepository.save(any(ScanRecord.class))).thenThrow(new IllegalStateException("DB down"));
+        ScanRun run = scanRunRegistry.begin(targetUrl, Set.of());
+
+        try {
+            scanService.executeScan(run);
+        } catch (IllegalStateException expected) {
+            // the executor swallows it in production
+        }
+
+        assertThat(run.isActive()).isFalse();
+        assertThat(scanService.findActiveRun()).isEmpty();
+    }
+
+    @Test
+    void startScan_historyInsertFails_rethrowsAndDoesNotBlockTheNextScan() {
+        when(scanRecordRepository.save(any(ScanRecord.class))).thenThrow(new IllegalStateException("DB down"));
+
+        assertThrows(IllegalStateException.class, () -> scanService.startScan("http://target", Set.of()));
+
+        assertThat(scanService.findActiveRun()).isEmpty();
+        verify(zapClient, never()).startSpiderScan(anyString());
+    }
+
+    @Test
+    void closeInterruptedScans_marksRowsLeftRunningAsFailed() {
+        ScanRecord leftRunning = ScanRecord.startedFrom(new ScanRun("http://target", Set.of(), 15));
+        when(scanRecordRepository.findAllByStatus("RUNNING")).thenReturn(List.of(leftRunning));
+
+        scanService.closeInterruptedScans();
+
+        assertThat(leftRunning.getStatus()).isEqualTo("FAILED");
+        assertThat(leftRunning.getErrorMessage()).contains("restarted");
+        assertThat(leftRunning.getFinishedAt()).isNotNull();
+        verify(scanRecordRepository).saveAll(List.of(leftRunning));
+    }
+
+    @Test
+    void findActiveRun_onlyReturnsAScanThatIsStillRunning() {
+        ScanRun run = scanRunRegistry.begin("http://target", Set.of());
+        assertThat(scanService.findActiveRun()).contains(run);
+
+        run.markDone(List.of());
+
+        assertThat(scanService.findActiveRun()).isEmpty();
     }
 
     @Test
@@ -114,7 +226,7 @@ class ScanServiceTest {
     void startScan_zapScanNeverCompletesWithinMaxWait_marksRunFailed() {
         // negative max-wait makes the deadline already-past on the very first poll,
         // so this fails fast instead of actually sleeping/looping in the test.
-        scanService = new ScanService(zapClient, scanFindingRepository, scanRunRegistry,
+        scanService = new ScanService(zapClient, scanFindingRepository, scanRecordRepository, scanRunRegistry,
                 new SynchronousExecutorService(), 1L, -1_000L);
         when(zapClient.startSpiderScan("http://target")).thenReturn("spider-1");
         when(zapClient.getSpiderStatus("spider-1")).thenReturn(42);

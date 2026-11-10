@@ -8,11 +8,12 @@ const ICONS: Record<Severity, string> = {
   Informational: 'i',
 };
 
-export default function SeverityBadge({ severity }: { severity: Severity }) {
+/** compact keeps the label for screen readers only; the icon's shape still tells severities apart. */
+export default function SeverityBadge({ severity, compact = false }: { severity: Severity; compact?: boolean }) {
   return (
     <span className={`badge badge-${severity.toLowerCase()}`}>
       <span className="badge-icon" aria-hidden="true">{ICONS[severity]}</span>
-      {severity}
+      <span className={compact ? 'sr-only' : undefined}>{severity}</span>
     </span>
   );
 }

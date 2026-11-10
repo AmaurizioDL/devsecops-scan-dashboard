@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -32,11 +33,49 @@ class ScanControllerTest {
     @Mock
     private ScanFindingRepository scanFindingRepository;
 
+    @Mock
+    private ScanRecordRepository scanRecordRepository;
+
     private ScanController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new ScanController(scanService, scanFindingRepository);
+        controller = new ScanController(scanService, scanFindingRepository, scanRecordRepository);
+    }
+
+    @Test
+    void listScans_returnsHistoryNewestFirst() {
+        List<ScanRecord> history = List.of(ScanRecord.startedFrom(new ScanRun("http://a", Set.of(), 15)));
+        when(scanRecordRepository.findAllByOrderByStartedAtDesc()).thenReturn(history);
+
+        assertThat(controller.listScans()).isSameAs(history);
+    }
+
+    @Test
+    void getCurrentScan_scanRunning_returns200WithView() {
+        ScanRun run = new ScanRun("http://a", Set.of(), 15);
+        when(scanService.findActiveRun()).thenReturn(Optional.of(run));
+
+        ResponseEntity<ScanRunView> response = controller.getCurrentScan();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().scanId()).isEqualTo(run.getScanId());
+    }
+
+    @Test
+    void getCurrentScan_noScanRunning_returns204() {
+        when(scanService.findActiveRun()).thenReturn(Optional.empty());
+
+        assertThat(controller.getCurrentScan().getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+    }
+
+    @Test
+    void listFindings_withScanId_returnsOnlyThatScansFindings() {
+        List<ScanFinding> expected = List.of();
+        when(scanFindingRepository.findAllByScanRunIdOrderByDetectedAtDesc("scan-1")).thenReturn(expected);
+
+        assertThat(controller.listFindings("scan-1")).isSameAs(expected);
+        verify(scanFindingRepository, never()).findAllByOrderByDetectedAtDesc();
     }
 
     @Test
@@ -159,7 +198,7 @@ class ScanControllerTest {
         List<ScanFinding> expected = List.of();
         when(scanFindingRepository.findAllByOrderByDetectedAtDesc()).thenReturn(expected);
 
-        List<ScanFinding> result = controller.listFindings();
+        List<ScanFinding> result = controller.listFindings(null);
 
         assertThat(result).isSameAs(expected);
     }

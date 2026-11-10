@@ -9,4 +9,6 @@ public interface ScanFindingRepository extends JpaRepository<ScanFinding, Intege
     List<ScanFinding> findAllByOrderByDetectedAtDesc();
 
     List<ScanFinding> findAllByTargetUrlOrderByDetectedAtDesc(String targetUrl);
+
+    List<ScanFinding> findAllByScanRunIdOrderByDetectedAtDesc(String scanRunId);
 }

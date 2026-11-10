@@ -73,12 +73,22 @@ export function summarize(findings: Finding[]): Summary {
 export interface FindingFilters {
   severity: Severity | '';
   owasp: string;
+  /** Exact target URL the scan was run against; '' = all targets. */
+  target: string;
   search: string;
+}
+
+export const NO_FILTERS: FindingFilters = { severity: '', owasp: '', target: '', search: '' };
+
+/** Distinct scanned targets, alphabetically. */
+export function targetsOf(findings: Finding[]): string[] {
+  return [...new Set(findings.map((f) => f.targetUrl))].sort();
 }
 
 export function filterFindings(findings: Finding[], filters: FindingFilters): Finding[] {
   const search = filters.search.trim().toLowerCase();
   return findings
+    .filter((f) => !filters.target || f.targetUrl === filters.target)
     .filter((f) => !filters.severity || normalizeSeverity(f.riskLevel) === filters.severity)
     .filter((f) => !filters.owasp || owaspKey(f) === filters.owasp)
     .filter(

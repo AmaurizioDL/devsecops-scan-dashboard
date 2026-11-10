@@ -36,6 +36,11 @@ public class ScanRunRegistry {
         }
     }
 
+    /** The most recently started scan (running or already finished), if any since startup. */
+    public Optional<ScanRun> current() {
+        return Optional.ofNullable(current.get());
+    }
+
     public Optional<ScanRun> find(String scanId) {
         ScanRun run = current.get();
         if (run != null && run.getScanId().equals(scanId)) {

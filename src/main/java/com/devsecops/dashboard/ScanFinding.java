@@ -59,6 +59,10 @@ public class ScanFinding {
     @Column(name = "detected_at")
     private LocalDateTime detectedAt;
 
+    /** Scan that first found this finding (null for findings stored before scan history existed). */
+    @Column(name = "scan_run_id", length = 36)
+    private String scanRunId;
+
     protected ScanFinding() {
     }
 
@@ -189,5 +193,13 @@ public class ScanFinding {
 
     public void setDetectedAt(LocalDateTime detectedAt) {
         this.detectedAt = detectedAt;
+    }
+
+    public String getScanRunId() {
+        return scanRunId;
+    }
+
+    public void setScanRunId(String scanRunId) {
+        this.scanRunId = scanRunId;
     }
 }

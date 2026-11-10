@@ -1,4 +1,4 @@
-// Mirrors the backend's JSON (ScanFinding entity and ScanRunView record).
+// Mirrors the backend's JSON (ScanFinding and ScanRecord entities, ScanRunView record).
 
 export interface Finding {
   id: number;
@@ -16,6 +16,8 @@ export interface Finding {
   evidence: string | null;
   reference: string | null;
   detectedAt: string | null;
+  /** Scan that first found it; null for findings stored before scan history existed. */
+  scanRunId: string | null;
 }
 
 export type ScanPhase = 'SPIDER' | 'ACTIVE_SCAN' | 'DONE' | 'STOPPED' | 'FAILED';
@@ -31,4 +33,22 @@ export interface ScanRun {
   elapsedSeconds: number;
   findings: Finding[] | null;
   errorMessage: string | null;
+}
+
+export type ScanStatus = 'RUNNING' | 'DONE' | 'STOPPED' | 'FAILED';
+
+/** One row of the scan history. */
+export interface ScanRecord {
+  id: string;
+  targetUrl: string;
+  /** Comma-separated ScanRiskLevel values; empty = every active-scan rule ran. */
+  riskLevels: string | null;
+  status: ScanStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  errorMessage: string | null;
+  newHigh: number;
+  newMedium: number;
+  newLow: number;
+  newInformational: number;
 }

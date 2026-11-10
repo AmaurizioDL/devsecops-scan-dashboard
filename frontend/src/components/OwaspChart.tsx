@@ -1,50 +1,30 @@
 import { useState } from 'react';
-import { SEVERITIES, type Summary } from '../findings';
-import SeverityBadge from './SeverityBadge';
+import type { Summary } from '../findings';
 
 interface Props {
   summary: Summary;
 }
 
-export default function SummaryPanel({ summary }: Props) {
+/** Findings per OWASP Top 10 category, one horizontal bar each, with a table view. */
+export default function OwaspChart({ summary }: Props) {
   const [showTable, setShowTable] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const max = Math.max(1, ...summary.byOwasp.map((o) => o.count));
 
+  if (summary.byOwasp.length === 0) {
+    return <p className="muted">No findings yet.</p>;
+  }
+
   return (
-    <section className="card" aria-labelledby="summary-title">
-      <h2 id="summary-title">Summary</h2>
-      <div className="stat-grid">
-        <div className="stat">
-          <span className="stat-label">Findings</span>
-          <span className="stat-value">{summary.total}</span>
-          <span className="stat-hint muted">one per alert and URL</span>
-        </div>
-        <div className="stat">
-          <span className="stat-label">Unique vulnerabilities</span>
-          <span className="stat-value">{summary.uniqueVulnerabilities}</span>
-          <span className="stat-hint muted">grouped as in the reports</span>
-        </div>
-        {SEVERITIES.map((severity) => (
-          <div className="stat" key={severity}>
-            <span className="stat-label"><SeverityBadge severity={severity} /></span>
-            <span className="stat-value">{summary.bySeverity[severity]}</span>
-          </div>
-        ))}
+    <div>
+      <div className="chart-toolbar">
+        <span className="muted small">Findings per category</span>
+        <button type="button" className="link-button" onClick={() => setShowTable((v) => !v)}>
+          {showTable ? 'Show chart' : 'Show as table'}
+        </button>
       </div>
 
-      <div className="chart-header">
-        <h3>Findings by OWASP Top 10 category</h3>
-        {summary.byOwasp.length > 0 && (
-          <button type="button" className="link-button" onClick={() => setShowTable((v) => !v)}>
-            {showTable ? 'Show chart' : 'Show as table'}
-          </button>
-        )}
-      </div>
-
-      {summary.byOwasp.length === 0 ? (
-        <p className="muted">No findings yet.</p>
-      ) : showTable ? (
+      {showTable ? (
         <table className="data-table compact">
           <thead>
             <tr><th scope="col">Category</th><th scope="col" className="num">Findings</th></tr>
@@ -90,6 +70,6 @@ export default function SummaryPanel({ summary }: Props) {
           })}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

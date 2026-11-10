@@ -33,3 +33,28 @@ ALTER TABLE scan_findings ADD COLUMN IF NOT EXISTS confidence VARCHAR(20);
 ALTER TABLE scan_findings ADD COLUMN IF NOT EXISTS plugin_id VARCHAR(20);
 ALTER TABLE scan_findings ADD COLUMN IF NOT EXISTS evidence TEXT;
 ALTER TABLE scan_findings ADD COLUMN IF NOT EXISTS reference TEXT;
+
+-- Historial de scans: una fila por scan, insertada al iniciarlo y completada al terminar
+-- (status DONE/STOPPED/FAILED y conteo de hallazgos nuevos por severidad). Los que
+-- quedan en RUNNING porque el backend se reinicio a mitad de scan se marcan FAILED al
+-- arrancar (ver ScanService). Igual que arriba: re-ejecutar este archivo sobre una base
+-- existente agrega la tabla y la columna sin borrar findings.
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id VARCHAR(36) PRIMARY KEY,
+    target_url TEXT NOT NULL,
+    risk_levels VARCHAR(40),
+    status VARCHAR(20) NOT NULL,
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    error_message TEXT,
+    new_high INTEGER NOT NULL DEFAULT 0,
+    new_medium INTEGER NOT NULL DEFAULT 0,
+    new_low INTEGER NOT NULL DEFAULT 0,
+    new_informational INTEGER NOT NULL DEFAULT 0
+);
+
+-- Scan que encontro por primera vez cada hallazgo (NULL en hallazgos guardados antes
+-- de que existiera el historial).
+ALTER TABLE scan_findings ADD COLUMN IF NOT EXISTS scan_run_id VARCHAR(36)
+    REFERENCES scan_runs(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_scan_findings_scan_run_id ON scan_findings(scan_run_id);

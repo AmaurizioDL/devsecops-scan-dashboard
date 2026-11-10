@@ -77,6 +77,25 @@ jobs:
             sleep 10
           done
 
+      - name: Check the scan history row and the findings linked to it
+        run: |
+          psql() { docker exec postgres psql -U postgres -d devsecops_dashboard -At -c "$1"; }
+          HISTORY=$(curl -fsS "$BACKEND/api/scans")
+          echo "$HISTORY" | jq -c '.[] | {id, status, riskLevels, startedAt, finishedAt, newHigh, newMedium, newLow, newInformational}'
+          SCAN_ID=$(echo "$HISTORY" | jq -r '.[0].id')
+          STATUS=$(echo "$HISTORY" | jq -r '.[0].status')
+          RECORDED=$(echo "$HISTORY" | jq '.[0] | .newHigh + .newMedium + .newLow + .newInformational')
+          LINKED=$(curl -fsS "$BACKEND/api/findings?scanId=$SCAN_ID" | jq length)
+          UNLINKED=$(psql "SELECT COUNT(*) FROM scan_findings WHERE scan_run_id IS NULL")
+          echo "status=$STATUS new findings recorded=$RECORDED linked=$LINKED unlinked=$UNLINKED"
+          case "$STATUS" in DONE|STOPPED) ;; *) echo "::error::history row is $STATUS, expected DONE/STOPPED"; exit 1 ;; esac
+          [ "$RECORDED" -eq "$LINKED" ] || { echo "::error::history counts ($RECORDED) != findings linked to the scan ($LINKED)"; exit 1; }
+          [ "$UNLINKED" -eq 0 ] || { echo "::error::$UNLINKED findings are not linked to a scan"; exit 1; }
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' "$BACKEND/api/scans/current")
+          [ "$CODE" = 204 ] || { echo "::error::/api/scans/current returned $CODE with no scan running"; exit 1; }
+          MAGIC=$(curl -fsS "$BACKEND/api/reports/technical?scanId=$SCAN_ID" | head -c 5)
+          [ "$MAGIC" = "%PDF-" ] || { echo "::error::per-scan technical PDF is not a PDF"; exit 1; }
+
       - name: Check new report columns are populated
         run: |
           psql() { docker exec postgres psql -U postgres -d devsecops_dashboard -At -c "$1"; }

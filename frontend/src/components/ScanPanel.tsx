@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { ApiError, getScan, startScan, stopScan } from '../api';
+import { useState } from 'react';
 import { formatDuration } from '../findings';
-import type { ScanPhase, ScanRiskLevel, ScanRun } from '../types';
+import type { ScanPhase, ScanRiskLevel } from '../types';
+import type { CurrentScan } from '../useCurrentScan';
 
-const POLL_INTERVAL_MS = 2000;
-const STORAGE_KEY = 'devsecops.currentScanId';
 const RISK_LEVELS: ScanRiskLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 
 const PHASE_LABELS: Record<ScanPhase, string> = {
@@ -15,71 +13,15 @@ const PHASE_LABELS: Record<ScanPhase, string> = {
   FAILED: 'Failed',
 };
 
-function isActive(run: ScanRun | null): boolean {
-  return run?.phase === 'SPIDER' || run?.phase === 'ACTIVE_SCAN';
-}
-
-// localStorage can throw (private mode, blocked storage); the scan still works without it.
-function readSavedScanId(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function saveScanId(scanId: string | null) {
-  try {
-    if (scanId) localStorage.setItem(STORAGE_KEY, scanId);
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 interface Props {
-  onScanFinished: () => void;
+  scan: CurrentScan;
 }
 
-export default function ScanPanel({ onScanFinished }: Props) {
+export default function ScanPanel({ scan }: Props) {
   // The backend resolves the target from inside the compose network, hence juice-shop:3000.
   const [targetUrl, setTargetUrl] = useState('http://juice-shop:3000');
   const [riskLevels, setRiskLevels] = useState<ScanRiskLevel[]>(['LOW']);
-  const [run, setRun] = useState<ScanRun | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const onScanFinishedRef = useRef(onScanFinished);
-  onScanFinishedRef.current = onScanFinished;
-
-  // Resume following a scan started before a page reload. The backend has no
-  // "current scan" endpoint, so the id is remembered in the browser.
-  useEffect(() => {
-    const savedId = readSavedScanId();
-    if (!savedId) return;
-    getScan(savedId)
-      .then(setRun)
-      .catch(() => saveScanId(null));
-  }, []);
-
-  const scanId = run?.scanId;
-  const active = isActive(run);
-
-  useEffect(() => {
-    if (!scanId || !active) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const next = await getScan(scanId);
-        setRun(next);
-        if (!isActive(next)) {
-          saveScanId(null);
-          onScanFinishedRef.current();
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    }, POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [scanId, active]);
+  const { run, active, busy, error } = scan;
 
   function toggleRisk(level: ScanRiskLevel) {
     setRiskLevels((current) =>
@@ -87,40 +29,17 @@ export default function ScanPanel({ onScanFinished }: Props) {
     );
   }
 
-  async function handleStart(event: React.FormEvent) {
+  function handleStart(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const started = await startScan(targetUrl.trim(), riskLevels);
-      setRun(started);
-      saveScanId(started.scanId);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        setError('Another scan is already running. Wait for it to finish or stop it first.');
-      } else {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleStop() {
-    if (!run) return;
-    setBusy(true);
-    try {
-      setRun(await stopScan(run.scanId));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+    void scan.start(targetUrl.trim(), riskLevels);
   }
 
   return (
     <section className="card" aria-labelledby="scan-title">
-      <h2 id="scan-title">Run a scan</h2>
+      <div className="card-header">
+        <h2 id="scan-title">Run a scan</h2>
+        <p className="muted">Spider + passive + active scan with OWASP ZAP. One scan runs at a time.</p>
+      </div>
       <form onSubmit={handleStart} className="scan-form">
         <label className="field">
           <span>Target URL</span>
@@ -155,7 +74,7 @@ export default function ScanPanel({ onScanFinished }: Props) {
             Start scan
           </button>
           {active && (
-            <button type="button" className="danger" onClick={handleStop} disabled={busy}>
+            <button type="button" className="danger" onClick={() => void scan.stop()} disabled={busy}>
               Stop scan
             </button>
           )}
