@@ -18,7 +18,8 @@ on:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to Ubuntu 26.04, where the pinned Playwright has no Chromium build.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       BACKEND: http://localhost:8091
