@@ -34,10 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Start the stack
+      - name: Start the stack with the one-command start script
         run: |
-          cp .env.example .env
-          docker compose up -d --build
+          # The same script a user runs after cloning: creates .env, builds, waits until ready.
+          ./start.sh
           docker compose ps
 
       - name: Wait for backend, ZAP and Grafana

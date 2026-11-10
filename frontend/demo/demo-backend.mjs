@@ -1,0 +1,213 @@
+// In-memory stand-in for the dashboard backend, used by `npm run demo` so the UI can be tried
+// with Node alone (no Docker, ZAP or Postgres). It answers the same /api routes with sample
+// findings, and simulated scans add a few new findings when they finish. Nothing is scanned.
+import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
+
+const RULES = [
+  { pluginId: '40018', name: 'SQL Injection', risk: 'High', cwe: 89, owasp: 'A03:2021', fix: 'Use parameterized queries or prepared statements; never build SQL from request input.' },
+  { pluginId: '40012', name: 'Cross Site Scripting (Reflected)', risk: 'High', cwe: 79, owasp: 'A03:2021', fix: 'Encode output for its context and validate input on the server; add a strict Content-Security-Policy.' },
+  { pluginId: '10038', name: 'Content Security Policy (CSP) Header Not Set', risk: 'Medium', cwe: 693, owasp: 'A05:2021', fix: 'Send a Content-Security-Policy header that only allows the sources the page needs.' },
+  { pluginId: '10098', name: 'Cross-Domain Misconfiguration', risk: 'Medium', cwe: 264, owasp: 'A01:2021', fix: 'Restrict Access-Control-Allow-Origin to trusted origins instead of "*".' },
+  { pluginId: '10020', name: 'Missing Anti-clickjacking Header', risk: 'Medium', cwe: 1021, owasp: 'A05:2021', fix: "Send X-Frame-Options: DENY or CSP frame-ancestors 'none'." },
+  { pluginId: '10036', name: 'Server Leaks Version Information', risk: 'Low', cwe: 200, owasp: 'A01:2021', fix: 'Remove or genericize the Server header.' },
+  { pluginId: '10021', name: 'X-Content-Type-Options Header Missing', risk: 'Low', cwe: 693, owasp: 'A05:2021', fix: 'Send X-Content-Type-Options: nosniff on every response.' },
+  { pluginId: '10096', name: 'Timestamp Disclosure - Unix', risk: 'Low', cwe: 200, owasp: 'A01:2021', fix: 'Make sure the timestamp is not sensitive or remove it from responses.' },
+  { pluginId: '10027', name: 'Information Disclosure - Suspicious Comments', risk: 'Informational', cwe: 200, owasp: 'A01:2021', fix: 'Remove comments that reveal internals before deploying.' },
+  { pluginId: '10109', name: 'Modern Web Application', risk: 'Informational', cwe: null, owasp: null, fix: 'No action needed: informational only.' },
+  { pluginId: '10104', name: 'User Agent Fuzzer', risk: 'Informational', cwe: null, owasp: 'A06:2021', fix: 'Review responses that change with the User-Agent header.' },
+];
+const PATHS = ['', 'rest/products/search?q=apple', 'ftp', 'assets/i18n/en.json', 'api/Users', 'socket.io/?EIO=4', 'rest/user/login', 'api/Products/1', 'main.js', 'robots.txt'];
+const COUNT_FIELD = { High: 'newHigh', Medium: 'newMedium', Low: 'newLow', Informational: 'newInformational' };
+const SPIDER_SECONDS = 8;
+const ACTIVE_SECONDS = 16;
+
+/** Local time without zone, the way the real backend serializes LocalDateTime. */
+export function localIso(ms) {
+  const d = new Date(ms);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
+}
+
+function record(id, targetUrl, riskLevels, startedMs) {
+  return {
+    id, targetUrl, riskLevels, status: 'RUNNING', startedAt: localIso(startedMs), finishedAt: null,
+    errorMessage: null, newHigh: 0, newMedium: 0, newLow: 0, newInformational: 0,
+  };
+}
+
+export function createDemoState(now = Date.now()) {
+  const state = { scans: [], findings: [], nextId: 1, current: null, seq: 0 };
+  // A week of past scans against two targets, oldest first.
+  const plan = [
+    ['http://juice-shop:3000', 'LOW', 14, 'DONE'],
+    ['http://juice-shop:3000', 'HIGH,MEDIUM', 6, 'DONE'],
+    ['http://staging-api:8080', '', 9, 'DONE'],
+    ['http://juice-shop:3000', 'LOW', 0, 'FAILED'],
+    ['http://staging-api:8080', 'LOW', 3, 'STOPPED'],
+    ['http://juice-shop:3000', 'MEDIUM', 4, 'DONE'],
+  ];
+  plan.forEach(([target, levels, count, status], i) => {
+    const started = now - (plan.length - i) * 26 * 3_600_000;
+    const scan = record(randomUUID(), target, levels, started);
+    addFindings(state, scan, count, started);
+    scan.status = status;
+    scan.finishedAt = localIso(started + (95 + i * 37) * 1000);
+    if (status === 'FAILED') scan.errorMessage = 'Could not reach ZAP at http://zap:8080 (connection refused)';
+    state.scans.unshift(scan);
+  });
+  return state;
+}
+
+function addFindings(state, scan, count, atMs) {
+  const added = [];
+  for (let k = 0; k < count; k++) {
+    const rule = RULES[(state.seq * 5 + k * 3) % RULES.length];
+    const path = PATHS[(state.seq + k) % PATHS.length];
+    state.seq++;
+    const finding = {
+      id: state.nextId++, targetUrl: scan.targetUrl, scanType: k % 3 === 0 ? 'ACTIVE' : 'PASSIVE',
+      alertName: rule.name, riskLevel: rule.risk, cweId: rule.cwe, owaspCategory: rule.owasp,
+      affectedUrl: `${scan.targetUrl}/${path}${state.seq > PATHS.length ? `${path.includes('?') ? '&' : '?'}v=${state.seq}` : ''}`,
+      description: `ZAP raised "${rule.name}" on this URL. (Demo data: generated by the demo backend, not by a real scan.)`,
+      solution: rule.fix, confidence: ['High', 'Medium', 'Low'][k % 3], pluginId: rule.pluginId,
+      evidence: rule.risk === 'High' ? "' OR 1=1--" : null,
+      reference: rule.cwe ? `https://cwe.mitre.org/data/definitions/${rule.cwe}.html` : null,
+      detectedAt: localIso(atMs + k * 3000), scanRunId: scan.id,
+    };
+    state.findings.push(finding);
+    scan[COUNT_FIELD[rule.risk]]++;
+    added.push(finding);
+  }
+  return added;
+}
+
+/** ScanRunView of the simulated scan, advancing it to its next phase when its time is up. */
+export function scanView(state, now = Date.now()) {
+  const run = state.current;
+  const elapsed = (now - run.startedMs) / 1000;
+  if (!run.phaseDone) {
+    if (run.stopRequested) finishScan(state, run, 'STOPPED', now);
+    else if (elapsed >= SPIDER_SECONDS + ACTIVE_SECONDS) finishScan(state, run, 'DONE', now);
+  }
+  const inSpider = elapsed < SPIDER_SECONDS;
+  const phase = run.phaseDone ?? (inSpider ? 'SPIDER' : 'ACTIVE_SCAN');
+  const phaseSeconds = inSpider ? SPIDER_SECONDS : ACTIVE_SECONDS;
+  const phaseElapsed = inSpider ? elapsed : elapsed - SPIDER_SECONDS;
+  const percent = run.phaseDone ? (phase === 'DONE' ? 100 : run.percentAtStop) : Math.min(99, Math.floor((phaseElapsed / phaseSeconds) * 100));
+  return {
+    scanId: run.id, targetUrl: run.targetUrl, phase, percent,
+    etaSeconds: run.phaseDone ? null : Math.max(0, Math.round(phaseSeconds - phaseElapsed)),
+    elapsedSeconds: Math.round(elapsed), findings: run.phaseDone ? run.saved : [], errorMessage: null,
+  };
+}
+
+function finishScan(state, run, status, now) {
+  const scan = state.scans.find((s) => s.id === run.id);
+  run.percentAtStop = scanViewPercent(run, now);
+  // A full run finds a few new issues; a stopped one keeps what the spider phase found.
+  const count = status === 'DONE' ? 2 + (state.seq % 4) : 1;
+  run.saved = addFindings(state, scan, count, run.startedMs);
+  scan.status = status;
+  scan.finishedAt = localIso(now);
+  run.phaseDone = status;
+}
+
+function scanViewPercent(run, now) {
+  const elapsed = (now - run.startedMs) / 1000;
+  return elapsed < SPIDER_SECONDS
+    ? Math.floor((elapsed / SPIDER_SECONDS) * 100)
+    : Math.min(99, Math.floor(((elapsed - SPIDER_SECONDS) / ACTIVE_SECONDS) * 100));
+}
+
+export function isRunning(state, now = Date.now()) {
+  return !!state.current && !['DONE', 'STOPPED'].includes(scanView(state, now).phase);
+}
+
+/** Starts a simulated scan; returns null if one is already running (the API answers 409). */
+export function startScan(state, targetUrl, riskLevels, now = Date.now()) {
+  if (isRunning(state, now)) return null;
+  const id = randomUUID();
+  state.current = { id, targetUrl, startedMs: now, stopRequested: false, phaseDone: null, saved: [] };
+  state.scans.unshift(record(id, targetUrl, riskLevels, now));
+  return scanView(state, now);
+}
+
+/** A one-page PDF explaining that reports need the real backend. */
+export function demoPdf() {
+  const text = [
+    'ScanDash demo mode',
+    'PDF reports are generated by the real backend from real ZAP findings.',
+    'Run ./start.sh (or start.ps1 on Windows) to start the full stack with Docker.',
+  ];
+  const stream = `BT /F1 14 Tf 60 760 Td ${text.map((t, i) => `${i ? '0 -24 Td ' : ''}(${t}) Tj`).join(' ')} ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = objects.map((body, i) => {
+    const offset = pdf.length;
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+    return offset;
+  });
+  const xref = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('');
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf, 'latin1');
+}
+
+function validTarget(value) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !!url.hostname;
+  } catch {
+    return false;
+  }
+}
+
+export function startDemoBackend(port, state = createDemoState()) {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, 'http://localhost');
+    const json = (body, status = 200) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    const path = url.pathname;
+
+    if (path === '/api/findings' && req.method === 'GET') {
+      const scanId = url.searchParams.get('scanId');
+      const list = scanId ? state.findings.filter((f) => f.scanRunId === scanId) : state.findings;
+      return json([...list].sort((a, b) => b.detectedAt.localeCompare(a.detectedAt)));
+    }
+    if (path === '/api/scans' && req.method === 'GET') return json(state.scans);
+    if (path === '/api/scans' && req.method === 'POST') {
+      const targetUrl = url.searchParams.get('targetUrl') ?? '';
+      if (!validTarget(targetUrl)) return json({ message: 'targetUrl must be an http(s) URL with a host' }, 400);
+      const started = startScan(state, targetUrl, url.searchParams.get('riskLevels') ?? '');
+      return started ? json(started, 202) : json({ message: 'A scan is already running' }, 409);
+    }
+    if (path === '/api/scans/current') {
+      if (isRunning(state)) return json(scanView(state));
+      res.writeHead(204);
+      return res.end();
+    }
+    const scanMatch = path.match(/^\/api\/scans\/([^/]+)(\/stop)?$/);
+    if (scanMatch && state.current?.id === decodeURIComponent(scanMatch[1])) {
+      if (scanMatch[2] && req.method === 'POST') state.current.stopRequested = true;
+      return json(scanView(state));
+    }
+    if (path.startsWith('/api/reports/')) {
+      res.writeHead(200, {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'attachment; filename="demo-report.pdf"',
+      });
+      return res.end(demoPdf());
+    }
+    json({ message: `Not found: ${path}` }, 404);
+  });
+  return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
+}

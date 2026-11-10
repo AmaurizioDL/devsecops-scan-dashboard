@@ -18,6 +18,51 @@ OWASP Dependency-Track, and GitLab's Security Dashboard.
 Everything runs in Docker — clone the repo, `docker compose up`, done. No native database
 install, no host-level Java/Maven required.
 
+## Quick start
+
+Pick one. Both open the same dashboard in your browser.
+
+### Option A: real scans (Docker)
+
+Needs [Docker Desktop](https://docs.docker.com/get-docker/) running, with about 8 GB of memory for
+Docker. One command builds and starts all six containers, waits until they answer, and opens
+the dashboard:
+
+```bash
+git clone https://github.com/AmaurizioDL/devsecops-scan-dashboard.git
+cd devsecops-scan-dashboard
+./start.sh                                          # macOS, Linux, Git Bash
+powershell -ExecutionPolicy Bypass -File .start.ps1  # Windows PowerShell
+```
+
+The first run takes 5-10 minutes (image downloads and builds); later runs take seconds. Stop
+it with `docker compose down` (findings are kept; `docker compose down -v` wipes them).
+
+### Option B: just look around (no Docker)
+
+Needs only [Node.js](https://nodejs.org/) 18+. The real frontend runs against a small in-memory
+backend with sample findings; scans are simulated (nothing is scanned) and a banner says so:
+
+```bash
+cd devsecops-scan-dashboard/frontend
+npm ci
+npm run demo        # opens http://localhost:5180, Ctrl+C to stop
+```
+
+### Try it in 5 minutes
+
+1. **Scans** → keep the target `http://juice-shop:3000` (the intentionally vulnerable app that
+   ships with the stack) and the **Low-risk** rules, then **Start scan**. Progress shows on the
+   page and in the sidebar, and survives a page reload. A Low-risk scan takes about 2 minutes.
+2. **Overview** → findings by severity and OWASP Top 10 category, and how many new findings each
+   scan added. Click a column to open that scan.
+3. **Findings** → filter by target, severity, OWASP category or text (`CWE-79`); click a row for
+   ZAP's description, the fix, evidence and references.
+4. **Reports** → download the executive and technical PDFs for all findings, one target or one
+   scan. **Open Grafana** (login `admin` / `admin`) for the historical dashboards.
+
+Only scan applications you own or are authorized to test.
+
 ## Cloud Development (GitHub Codespaces)
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/AmaurizioDL/devsecops-scan-dashboard)
@@ -277,7 +322,9 @@ mvn test
 Frontend unit tests (Vitest) cover the data logic behind the UI: severity normalization,
 OWASP category mapping, the summary counts and unique-vulnerability grouping (same rule as the
 PDF reports), the table's filtering (including by target) and sorting, the scan-history
-helpers behind the trend chart, and the hash routes.
+helpers behind the trend chart, the hash routes, and the demo backend behind `npm run demo`
+(its seeded history matches its findings, simulated scans finish or stop and save findings,
+and its report links return a valid PDF).
 
 ```bash
 cd frontend
@@ -367,10 +414,10 @@ machine-specific credentials are required. `git clone` → `cp .env.example .env
 
 **How it's verified:**
 
-- 72 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 16
+- 72 backend unit tests (JUnit 5 + Mockito) run as a gate in the `Dockerfile` build, plus 20
   frontend Vitest tests (see [Tests](#tests)).
 - The `e2e-verify.yml` GitHub Actions workflow (manual `workflow_dispatch`) brings up the whole
-  stack on a GitHub-hosted runner and scans Juice Shop. It then checks the stored findings,
+  stack on a GitHub-hosted runner with `./start.sh` (the same script users run) and scans Juice Shop. It then checks the stored findings,
   checks the scan history row and the findings linked to it, downloads the PDF reports (also
   per scan), queries Grafana's datasource and panels, and confirms the frontend serves the app
   and proxies `/api`. Then it drives the UI in headless Chromium (every view, the finding

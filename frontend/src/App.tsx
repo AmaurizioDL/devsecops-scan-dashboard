@@ -14,6 +14,9 @@ import ScanHistoryTable from './components/ScanHistoryTable';
 import ScanPanel from './components/ScanPanel';
 import Sidebar from './components/Sidebar';
 
+// Set by `npm run demo` (frontend/demo/run-demo.mjs); never set in the real build.
+const DEMO = import.meta.env.VITE_DEMO === 'true';
+
 const TITLES: Record<View, { title: string; subtitle: string }> = {
   overview: { title: 'Security overview', subtitle: 'OWASP ZAP findings mapped to the OWASP Top 10, across every scan.' },
   findings: { title: 'Findings', subtitle: 'Every stored finding. Click one for the full ZAP detail and the fix.' },
@@ -70,6 +73,13 @@ export default function App() {
             <RefreshIcon size={14} /> {loading ? 'Loading…' : 'Refresh'}
           </button>
         </header>
+
+        {DEMO && (
+          <div className="demo-banner" role="note">
+            <strong>Demo mode</strong>: sample data and simulated scans, nothing is scanned. Run{' '}
+            <code>./start.sh</code> (or <code>start.ps1</code> on Windows) for real OWASP ZAP scans with Docker.
+          </div>
+        )}
 
         {error && (
           <div className="alert" role="alert">
